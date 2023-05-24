@@ -9,6 +9,8 @@ targets:
       flutter:
       logging:
       dio:
+      file:
+      sqflite:
   - name: github
   - name: registry
     sdks:
@@ -16,3 +18,5 @@ targets:
       pub:sentry_flutter:
       pub:sentry_logging:
       pub:sentry_dio:
+      pub:sentry_file:
+      pub:sentry_sqflite:

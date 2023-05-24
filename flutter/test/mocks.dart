@@ -1,12 +1,16 @@
-import 'dart:async';
+// ignore_for_file: inference_failure_on_function_return_type
 
 import 'package:flutter/services.dart';
+import 'package:flutter/src/widgets/binding.dart';
+import 'package:flutter_test/flutter_test.dart';
 import 'package:mockito/annotations.dart';
 import 'package:sentry/sentry.dart';
 import 'package:sentry/src/platform/platform.dart';
 import 'package:sentry/src/sentry_tracer.dart';
 
 import 'package:meta/meta.dart';
+import 'package:sentry_flutter/src/binding_wrapper.dart';
+import 'package:sentry_flutter/src/renderer/renderer.dart';
 import 'package:sentry_flutter/src/sentry_native.dart';
 import 'package:sentry_flutter/src/sentry_native_channel.dart';
 
@@ -14,6 +18,7 @@ import 'mocks.mocks.dart';
 import 'no_such_method_provider.dart';
 
 const fakeDsn = 'https://abc@def.ingest.sentry.io/1234567';
+const fakeProguardUuid = '3457d982-65ef-576d-a6ad-65b5f30f49a5';
 
 // https://github.com/dart-lang/mockito/blob/master/NULL_SAFETY_README.md#fallback-generators
 ISentrySpan startTransactionShim(
@@ -69,6 +74,10 @@ class MockPlatform with NoSuchMethodProvider implements Platform {
 
   factory MockPlatform.linux() {
     return MockPlatform(os: 'linux');
+  }
+
+  factory MockPlatform.fuchsia() {
+    return MockPlatform(os: 'fuchsia');
   }
 
   @override
@@ -145,6 +154,117 @@ class NoOpHub with NoSuchMethodProvider implements Hub {
 
   @override
   bool get isEnabled => false;
+}
+
+class MockSentryNative implements SentryNative {
+  @override
+  DateTime? appStartEnd;
+
+  @override
+  SentryNativeChannel? nativeChannel;
+
+  bool _didFetchAppStart = false;
+
+  @override
+  bool get didFetchAppStart => _didFetchAppStart;
+
+  Breadcrumb? breadcrumb;
+  var numberOfAddBreadcrumbCalls = 0;
+  var numberOfBeginNativeFramesCollectionCalls = 0;
+  var numberOfClearBreadcrumbsCalls = 0;
+  var numberOfEndNativeFramesCollectionCalls = 0;
+  var numberOfFetchNativeAppStartCalls = 0;
+  var removeContextsKey = '';
+  var numberOfRemoveContextsCalls = 0;
+  var removeExtraKey = '';
+  var numberOfRemoveExtraCalls = 0;
+  var removeTagKey = '';
+  var numberOfRemoveTagCalls = 0;
+  var numberOfResetCalls = 0;
+  Map<String, dynamic> setContextData = {};
+  var numberOfSetContextsCalls = 0;
+  Map<String, dynamic> setExtraData = {};
+  var numberOfSetExtraCalls = 0;
+  Map<String, String> setTagsData = {};
+  var numberOfSetTagCalls = 0;
+  SentryUser? sentryUser;
+  var numberOfSetUserCalls = 0;
+
+  @override
+  Future<void> addBreadcrumb(Breadcrumb breadcrumb) async {
+    this.breadcrumb = breadcrumb;
+    numberOfAddBreadcrumbCalls++;
+  }
+
+  @override
+  Future<void> beginNativeFramesCollection() async {
+    numberOfBeginNativeFramesCollectionCalls++;
+  }
+
+  @override
+  Future<void> clearBreadcrumbs() async {
+    numberOfClearBreadcrumbsCalls++;
+  }
+
+  @override
+  Future<NativeFrames?> endNativeFramesCollection(SentryId traceId) async {
+    numberOfEndNativeFramesCollectionCalls++;
+    return null;
+  }
+
+  @override
+  Future<NativeAppStart?> fetchNativeAppStart() async {
+    _didFetchAppStart = true;
+    numberOfFetchNativeAppStartCalls++;
+    return null;
+  }
+
+  @override
+  Future<void> removeContexts(String key) async {
+    removeContextsKey = key;
+    numberOfRemoveContextsCalls++;
+  }
+
+  @override
+  Future<void> removeExtra(String key) async {
+    removeExtraKey = key;
+    numberOfRemoveExtraCalls++;
+  }
+
+  @override
+  Future<void> removeTag(String key) async {
+    removeTagKey = key;
+    numberOfRemoveTagCalls++;
+  }
+
+  @override
+  void reset() {
+    numberOfResetCalls++;
+  }
+
+  @override
+  Future<void> setContexts(String key, value) async {
+    setContextData[key] = value;
+    numberOfSetContextsCalls++;
+  }
+
+  @override
+  Future<void> setExtra(String key, value) async {
+    setExtraData[key] = value;
+    numberOfSetExtraCalls++;
+  }
+
+  @override
+  Future<void> setTag(String key, String value) async {
+    setTagsData[key] = value;
+    numberOfSetTagCalls++;
+  }
+
+  @override
+  Future<void> setUser(SentryUser? sentryUser) async {
+    this.sentryUser = sentryUser;
+    numberOfSetUserCalls++;
+  }
 }
 
 class MockNativeChannel implements SentryNativeChannel {
@@ -224,3 +344,47 @@ class MockNativeChannel implements SentryNativeChannel {
     numberOfSetTagCalls += 1;
   }
 }
+
+class MockRendererWrapper implements RendererWrapper {
+  MockRendererWrapper(this._renderer);
+
+  final FlutterRenderer _renderer;
+
+  @override
+  FlutterRenderer getRenderer() {
+    return _renderer;
+  }
+
+  @override
+  String getRendererAsString() {
+    switch (getRenderer()) {
+      case FlutterRenderer.skia:
+        return 'Skia';
+      case FlutterRenderer.canvasKit:
+        return 'CanvasKit';
+      case FlutterRenderer.html:
+        return 'HTML';
+      case FlutterRenderer.unknown:
+        return 'Unknown';
+    }
+  }
+}
+
+class TestBindingWrapper implements BindingWrapper {
+  bool ensureBindingInitializedCalled = false;
+  bool getWidgetsBindingInstanceCalled = false;
+
+  @override
+  WidgetsBinding ensureInitialized() {
+    ensureBindingInitializedCalled = true;
+    return TestWidgetsFlutterBinding.ensureInitialized();
+  }
+
+  @override
+  WidgetsBinding get instance {
+    getWidgetsBindingInstanceCalled = true;
+    return TestWidgetsFlutterBinding.instance;
+  }
+}
+
+class MockSentryClient with NoSuchMethodProvider implements SentryClient {}

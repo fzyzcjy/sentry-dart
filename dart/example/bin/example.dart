@@ -12,7 +12,7 @@ import 'event_example.dart';
 Future<void> main() async {
   // ATTENTION: Change the DSN below with your own to see the events in Sentry. Get one at sentry.io
   const dsn =
-      'https://9934c532bf8446ef961450973c898537@o447951.ingest.sentry.io/5428562';
+      'https://e85b375ffb9f43cf8bdf9787768149e0@o447951.ingest.sentry.io/5428562';
 
   await Sentry.init(
     (options) => options
@@ -45,6 +45,7 @@ Future<void> runApp() async {
       username: 'first-user',
       email: 'first@user.lan',
       // ipAddress: '127.0.0.1', sendDefaultPii feature is enabled
+      // ignore: deprecated_member_use
       extras: <String, String>{'first-sign-in': '2020-01-01'},
     ));
     scope
@@ -101,9 +102,9 @@ Future<void> decode() async {
   throw StateError('This is a test error');
 }
 
-class TagEventProcessor extends EventProcessor {
+class TagEventProcessor implements EventProcessor {
   @override
-  FutureOr<SentryEvent?> apply(SentryEvent event, {hint}) {
+  SentryEvent? apply(SentryEvent event, {hint}) {
     return event..tags?.addAll({'page-locale': 'en-us'});
   }
 }

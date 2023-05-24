@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:meta/meta.dart';
+import 'sentry_attachment/sentry_attachment.dart';
 
 import 'event_processor.dart';
+import 'hint.dart';
+import 'sentry_trace_context_header.dart';
 import 'sentry_user_feedback.dart';
 import 'transport/rate_limiter.dart';
 import 'protocol.dart';
@@ -57,7 +60,7 @@ class SentryClient {
     SentryEvent event, {
     Scope? scope,
     dynamic stackTrace,
-    dynamic hint,
+    Hint? hint,
   }) async {
     if (_sampleRate()) {
       _recordLostEvent(event, DiscardReason.sampleRate);
@@ -69,6 +72,8 @@ class SentryClient {
     }
 
     SentryEvent? preparedEvent = _prepareEvent(event, stackTrace: stackTrace);
+
+    hint ??= Hint();
 
     if (scope != null) {
       preparedEvent = await scope.applyToEvent(preparedEvent, hint: hint);
@@ -82,7 +87,7 @@ class SentryClient {
       return _sentryId;
     }
 
-    preparedEvent = await _processEvent(
+    preparedEvent = await _runEventProcessors(
       preparedEvent,
       eventProcessors: _options.eventProcessors,
       hint: hint,
@@ -93,46 +98,36 @@ class SentryClient {
       return _sentryId;
     }
 
-    final beforeSend = _options.beforeSend;
-    if (beforeSend != null) {
-      final beforeSendEvent = preparedEvent;
-      try {
-        preparedEvent = await beforeSend(preparedEvent, hint: hint);
-      } catch (exception, stackTrace) {
-        _options.logger(
-          SentryLevel.error,
-          'The BeforeSend callback threw an exception',
-          exception: exception,
-          stackTrace: stackTrace,
-        );
-      }
-      if (preparedEvent == null) {
-        _recordLostEvent(beforeSendEvent, DiscardReason.beforeSend);
-        _options.logger(
-          SentryLevel.debug,
-          'Event was dropped by BeforeSend callback',
-        );
-        return _sentryId;
-      }
+    preparedEvent = await _runBeforeSend(
+      preparedEvent,
+      hint: hint,
+    );
+
+    // dropped by beforeSend
+    if (preparedEvent == null) {
+      return _sentryId;
     }
 
-    if (_options.platformChecker.platform.isAndroid &&
-        _options.enableScopeSync) {
-      /*
-      We do this to avoid duplicate breadcrumbs on Android as sentry-android applies the breadcrumbs
-      from the native scope onto every envelope sent through it. This scope will contain the breadcrumbs
-      sent through the scope sync feature. This causes duplicate breadcrumbs.
-      We then remove the breadcrumbs in all cases but if it is handled == false,
-      this is a signal that the app would crash and android would lose the breadcrumbs by the time the app is restarted to read
-      the envelope.
-      */
-      preparedEvent = _eventWithRemovedBreadcrumbsIfHandled(preparedEvent);
+    preparedEvent = _eventWithoutBreadcrumbsIfNeeded(preparedEvent);
+
+    var attachments = List<SentryAttachment>.from(scope?.attachments ?? []);
+    attachments.addAll(hint.attachments);
+    var screenshot = hint.screenshot;
+    if (screenshot != null) {
+      attachments.add(screenshot);
+    }
+
+    var viewHierarchy = hint.viewHierarchy;
+    if (viewHierarchy != null) {
+      attachments.add(viewHierarchy);
     }
 
     final envelope = SentryEnvelope.fromEvent(
       preparedEvent,
       _options.sdk,
-      attachments: scope?.attachments,
+      dsn: _options.dsn,
+      traceContext: scope?.span?.traceContext(),
+      attachments: attachments.isNotEmpty ? attachments : null,
     );
 
     final id = await captureEnvelope(envelope);
@@ -164,37 +159,43 @@ class SentryClient {
     final isolateId = isolateName?.hashCode;
 
     if (event.throwableMechanism != null) {
-      var sentryException = _exceptionFactory.getSentryException(
-        event.throwableMechanism,
-        stackTrace: stackTrace,
-      );
+      final extractedExceptions = _exceptionFactory.extractor
+          .flatten(event.throwableMechanism, stackTrace);
 
-      if (_options.platformChecker.isWeb) {
-        return event.copyWith(
-          exceptions: [
-            ...?event.exceptions,
-            sentryException,
-          ],
+      final sentryExceptions = <SentryException>[];
+      final sentryThreads = <SentryThread>[];
+
+      for (final extractedException in extractedExceptions) {
+        var sentryException = _exceptionFactory.getSentryException(
+          extractedException.exception,
+          stackTrace: extractedException.stackTrace,
         );
-      }
 
-      SentryThread? thread;
+        SentryThread? sentryThread;
 
-      if (isolateName != null && _options.attachThreads) {
-        sentryException = sentryException.copyWith(threadId: isolateId);
-        thread = SentryThread(
-          id: isolateId,
-          name: isolateName,
-          crashed: true,
-          current: true,
-        );
+        if (!_options.platformChecker.isWeb &&
+            isolateName != null &&
+            _options.attachThreads) {
+          sentryException = sentryException.copyWith(threadId: isolateId);
+          sentryThread = SentryThread(
+            id: isolateId,
+            name: isolateName,
+            crashed: true,
+            current: true,
+          );
+        }
+
+        sentryExceptions.add(sentryException);
+        if (sentryThread != null) {
+          sentryThreads.add(sentryThread);
+        }
       }
 
       return event.copyWith(
-        exceptions: [...?event.exceptions, sentryException],
+        exceptions: [...?event.exceptions, ...sentryExceptions],
         threads: [
           ...?event.threads,
-          if (thread != null) thread,
+          ...sentryThreads,
         ],
       );
     }
@@ -245,7 +246,7 @@ class SentryClient {
     dynamic throwable, {
     dynamic stackTrace,
     Scope? scope,
-    dynamic hint,
+    Hint? hint,
   }) {
     final event = SentryEvent(
       throwable: throwable,
@@ -267,7 +268,7 @@ class SentryClient {
     String? template,
     List<dynamic>? params,
     Scope? scope,
-    dynamic hint,
+    Hint? hint,
   }) {
     final event = SentryEvent(
       message: SentryMessage(formatted, template: template, params: params),
@@ -282,6 +283,7 @@ class SentryClient {
   Future<SentryId> captureTransaction(
     SentryTransaction transaction, {
     Scope? scope,
+    SentryTraceContextHeader? traceContext,
   }) async {
     SentryTransaction? preparedTransaction =
         _prepareEvent(transaction) as SentryTransaction;
@@ -299,7 +301,7 @@ class SentryClient {
       return _sentryId;
     }
 
-    preparedTransaction = await _processEvent(
+    preparedTransaction = await _runEventProcessors(
       preparedTransaction,
       eventProcessors: _options.eventProcessors,
     ) as SentryTransaction?;
@@ -309,12 +311,28 @@ class SentryClient {
       return _sentryId;
     }
 
-    final id = await captureEnvelope(
-      SentryEnvelope.fromTransaction(preparedTransaction, _options.sdk,
-          attachments: scope?.attachments
-              .where((element) => element.addToTransactions)
-              .toList()),
+    preparedTransaction =
+        await _runBeforeSend(preparedTransaction) as SentryTransaction?;
+
+    // dropped by beforeSendTransaction
+    if (preparedTransaction == null) {
+      return _sentryId;
+    }
+
+    preparedTransaction = _eventWithoutBreadcrumbsIfNeeded(preparedTransaction);
+
+    final attachments = scope?.attachments
+        .where((element) => element.addToTransactions)
+        .toList();
+    final envelope = SentryEnvelope.fromTransaction(
+      preparedTransaction,
+      _options.sdk,
+      dsn: _options.dsn,
+      traceContext: traceContext,
+      attachments: attachments,
     );
+    final id = await captureEnvelope(envelope);
+
     return id ?? SentryId.empty();
   }
 
@@ -328,21 +346,77 @@ class SentryClient {
     final envelope = SentryEnvelope.fromUserFeedback(
       userFeedback,
       _options.sdk,
+      dsn: _options.dsn,
     );
     return _attachClientReportsAndSend(envelope);
   }
 
   void close() => _options.httpClient.close();
 
-  Future<SentryEvent?> _processEvent(
+  Future<SentryEvent?> _runBeforeSend(
     SentryEvent event, {
-    dynamic hint,
+    Hint? hint,
+  }) async {
+    SentryEvent? eventOrTransaction = event;
+
+    final beforeSend = _options.beforeSend;
+    final beforeSendTransaction = _options.beforeSendTransaction;
+    String beforeSendName = 'beforeSend';
+
+    try {
+      if (event is SentryTransaction && beforeSendTransaction != null) {
+        beforeSendName = 'beforeSendTransaction';
+        final e = beforeSendTransaction(event);
+        if (e is Future<SentryTransaction?>) {
+          eventOrTransaction = await e;
+        } else {
+          eventOrTransaction = e;
+        }
+      } else if (beforeSend != null) {
+        final e = beforeSend(event, hint: hint);
+        if (e is Future<SentryEvent?>) {
+          eventOrTransaction = await e;
+        } else {
+          eventOrTransaction = e;
+        }
+      }
+    } catch (exception, stackTrace) {
+      _options.logger(
+        SentryLevel.error,
+        'The $beforeSendName callback threw an exception',
+        exception: exception,
+        stackTrace: stackTrace,
+      );
+      if (_options.devMode) {
+        rethrow;
+      }
+    }
+
+    if (eventOrTransaction == null) {
+      _recordLostEvent(event, DiscardReason.beforeSend);
+      _options.logger(
+        SentryLevel.debug,
+        '${event.runtimeType} was dropped by $beforeSendName callback',
+      );
+    }
+
+    return eventOrTransaction;
+  }
+
+  Future<SentryEvent?> _runEventProcessors(
+    SentryEvent event, {
+    Hint? hint,
     required List<EventProcessor> eventProcessors,
   }) async {
     SentryEvent? processedEvent = event;
     for (final processor in eventProcessors) {
       try {
-        processedEvent = await processor.apply(processedEvent!, hint: hint);
+        final e = processor.apply(processedEvent!, hint: hint);
+        if (e is Future<SentryEvent?>) {
+          processedEvent = await e;
+        } else {
+          processedEvent = e;
+        }
       } catch (exception, stackTrace) {
         _options.logger(
           SentryLevel.error,
@@ -350,6 +424,9 @@ class SentryClient {
           exception: exception,
           stackTrace: stackTrace,
         );
+        if (_options.devMode) {
+          rethrow;
+        }
       }
       if (processedEvent == null) {
         _recordLostEvent(event, DiscardReason.eventProcessor);
@@ -377,18 +454,38 @@ class SentryClient {
     _options.recorder.recordLostEvent(reason, category);
   }
 
-  SentryEvent _eventWithRemovedBreadcrumbsIfHandled(SentryEvent event) {
+  T _eventWithoutBreadcrumbsIfNeeded<T extends SentryEvent>(T event) {
+    if (_shouldRemoveBreadcrumbs(event)) {
+      return event.copyWith(breadcrumbs: []) as T;
+    } else {
+      return event;
+    }
+  }
+
+  /// We do this to avoid duplicate breadcrumbs on Android as sentry-android applies the breadcrumbs
+  /// from the native scope onto every envelope sent through it. This scope will contain the breadcrumbs
+  /// sent through the scope sync feature. This causes duplicate breadcrumbs.
+  /// We then remove the breadcrumbs in all cases but if it is handled == false,
+  /// this is a signal that the app would crash and android would lose the breadcrumbs by the time the app is restarted to read
+  /// the envelope.
+  bool _shouldRemoveBreadcrumbs(SentryEvent event) {
+    if (_options.platformChecker.isWeb) {
+      return false;
+    }
+
+    final isAndroid = _options.platformChecker.platform.isAndroid;
+    final enableScopeSync = _options.enableScopeSync;
+
+    if (!isAndroid || !enableScopeSync) {
+      return false;
+    }
+
     final mechanisms =
         (event.exceptions ?? []).map((e) => e.mechanism).whereType<Mechanism>();
     final hasNoMechanism = mechanisms.isEmpty;
     final hasOnlyHandledMechanism =
         mechanisms.every((e) => (e.handled ?? true));
-
-    if (hasNoMechanism || hasOnlyHandledMechanism) {
-      return event.copyWith(breadcrumbs: []);
-    } else {
-      return event;
-    }
+    return hasNoMechanism || hasOnlyHandledMechanism;
   }
 
   Future<SentryId?> _attachClientReportsAndSend(SentryEnvelope envelope) {

@@ -7,12 +7,12 @@ import FlutterMacOS
 import AppKit
 #endif
 
-// swiftlint:disable file_length
+// swiftlint:disable file_length function_body_length
 
 // swiftlint:disable:next type_body_length
 public class SentryFlutterPluginApple: NSObject, FlutterPlugin {
 
-    private var sentryOptions: Options?
+    private static let nativeClientName = "sentry.cocoa.flutter"
 
     // The Cocoa SDK is init. after the notification didBecomeActiveNotification is registered.
     // We need to be able to receive this notification and start a session when the SDK is fully operational.
@@ -55,7 +55,29 @@ public class SentryFlutterPluginApple: NSObject, FlutterPlugin {
 
     }
 
-    // swiftlint:disable:next cyclomatic_complexity function_body_length
+    private lazy var iso8601Formatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(abbreviation: "UTC")
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
+        return formatter
+    }()
+
+    private lazy var iso8601FormatterWithMillisecondPrecision: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(abbreviation: "UTC")
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+        return formatter
+    }()
+
+    // Replace with `NSDate+SentryExtras` when available.
+    private func dateFrom(iso8601String: String) -> Date? {
+      return iso8601FormatterWithMillisecondPrecision.date(from: iso8601String)
+        ?? iso8601Formatter.date(from: iso8601String) // Parse date with low precision formatter for backward compatible
+    }
+
+    // swiftlint:disable:next cyclomatic_complexity
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch call.method as String {
         case "loadContexts":
@@ -87,6 +109,11 @@ public class SentryFlutterPluginApple: NSObject, FlutterPlugin {
             let key = arguments?["key"] as? String
             let value = arguments?["value"] as? Any
             setContexts(key: key, value: value, result: result)
+
+        case "removeContexts":
+            let arguments = call.arguments as? [String: Any?]
+            let key = arguments?["key"] as? String
+            removeContexts(key: key, result: result)
 
         case "setUser":
             let arguments = call.arguments as? [String: Any?]
@@ -132,9 +159,13 @@ public class SentryFlutterPluginApple: NSObject, FlutterPlugin {
     private func loadContexts(result: @escaping FlutterResult) {
         SentrySDK.configureScope { scope in
             let serializedScope = scope.serialize()
-            let context = serializedScope["context"]
 
-            var infos = ["contexts": context]
+            var context: [String: Any] = [:]
+            if let newContext = serializedScope["context"] as? [String: Any] {
+                context = newContext
+            }
+
+            var infos: [String: Any] = [:]
 
             if let tags = serializedScope["tags"] as? [String: String] {
                 infos["tags"] = tags
@@ -167,13 +198,40 @@ public class SentryFlutterPluginApple: NSObject, FlutterPlugin {
                 infos["user"] = ["id": PrivateSentrySDKOnly.installationID]
             }
 
-            if let integrations = self.sentryOptions?.integrations {
+            if let integrations = PrivateSentrySDKOnly.options.integrations {
                 infos["integrations"] = integrations
             }
 
-            if let sdkInfo = self.sentryOptions?.sdkInfo {
-                infos["package"] = ["version": sdkInfo.version, "sdk_name": "cocoapods:sentry-cocoa"]
+            let deviceStr = "device"
+            let appStr = "app"
+            if let extraContext = PrivateSentrySDKOnly.getExtraContext() as? [String: Any] {
+                // merge device
+                if let extraDevice = extraContext[deviceStr] as? [String: Any] {
+                    if var currentDevice = context[deviceStr] as? [String: Any] {
+                        currentDevice.merge(extraDevice) { (current, _) in current }
+                        context[deviceStr] = currentDevice
+                    } else {
+                        context[deviceStr] = extraDevice
+                    }
+                }
+
+                // merge app
+                if let extraApp = extraContext[appStr] as? [String: Any] {
+                    if var currentApp = context[appStr] as? [String: Any] {
+                        currentApp.merge(extraApp) { (current, _) in current }
+                        context[appStr] = currentApp
+                    } else {
+                        context[appStr] = extraApp
+                    }
+                }
             }
+
+            infos["contexts"] = context
+
+            // Not reading the name from PrivateSentrySDKOnly.getSdkName because
+            // this is added as a package and packages should follow the sentry-release-registry format
+            infos["package"] = ["version": PrivateSentrySDKOnly.getSdkVersionString(),
+                "sdk_name": "cocoapods:sentry-cocoa"]
 
             result(infos)
         }
@@ -194,31 +252,32 @@ public class SentryFlutterPluginApple: NSObject, FlutterPlugin {
         SentrySDK.start { options in
             self.updateOptions(arguments: arguments, options: options)
 
-            if arguments["enableAutoPerformanceTracking"] as? Bool ?? false {
+            if arguments["enableAutoPerformanceTracing"] as? Bool ?? false {
                 PrivateSentrySDKOnly.appStartMeasurementHybridSDKMode = true
                 #if os(iOS) || targetEnvironment(macCatalyst)
                 PrivateSentrySDKOnly.framesTrackingMeasurementHybridSDKMode = true
                 #endif
             }
 
-            self.sentryOptions = options
+            let version = PrivateSentrySDKOnly.getSdkVersionString()
+            PrivateSentrySDKOnly.setSdkName(SentryFlutterPluginApple.nativeClientName, andVersionString: version)
 
             // note : for now, in sentry-cocoa, beforeSend is not called before captureEnvelope
             options.beforeSend = { event in
                 self.setEventOriginTag(event: event)
 
                 if var sdk = event.sdk, self.isValidSdk(sdk: sdk) {
-                    if let packages = arguments["packages"] as? [String] {
-                        if var sdkPackages = sdk["packages"] as? [String] {
-                            sdk["packages"] = sdkPackages.append(contentsOf: packages)
+                    if let packages = arguments["packages"] as? [[String: String]] {
+                        if let sdkPackages = sdk["packages"] as? [[String: String]] {
+                            sdk["packages"] = sdkPackages + packages
                         } else {
                             sdk["packages"] = packages
                         }
                     }
 
                     if let integrations = arguments["integrations"] as? [String] {
-                        if var sdkIntegrations = sdk["integrations"] as? [String] {
-                            sdk["integrations"] = sdkIntegrations.append(contentsOf: integrations)
+                        if let sdkIntegrations = sdk["integrations"] as? [String] {
+                            sdk["integrations"] = sdkIntegrations + integrations
                         } else {
                             sdk["integrations"] = integrations
                         }
@@ -231,7 +290,8 @@ public class SentryFlutterPluginApple: NSObject, FlutterPlugin {
         }
 
        if didReceiveDidBecomeActiveNotification &&
-          (sentryOptions?.enableAutoSessionTracking == true || sentryOptions?.enableOutOfMemoryTracking == true) {
+            (PrivateSentrySDKOnly.options.enableAutoSessionTracking ||
+             PrivateSentrySDKOnly.options.enableWatchdogTerminationTracking) {
             // We send a SentryHybridSdkDidBecomeActive to the Sentry Cocoa SDK, so the SDK will mimics
             // the didBecomeActiveNotification notification. This is needed for session and OOM tracking.
            NotificationCenter.default.post(name: Notification.Name("SentryHybridSdkDidBecomeActive"), object: nil)
@@ -285,18 +345,12 @@ public class SentryFlutterPluginApple: NSObject, FlutterPlugin {
             options.dist = dist
         }
 
-        if let enableAutoNativeBreadcrumbs = arguments["enableAutoNativeBreadcrumbs"] as? Bool,
-           enableAutoNativeBreadcrumbs == false {
-            options.integrations = options.integrations?.filter { (name) -> Bool in
-                name != "SentryAutoBreadcrumbTrackingIntegration"
-            }
+        if let enableAutoNativeBreadcrumbs = arguments["enableAutoNativeBreadcrumbs"] as? Bool {
+            options.enableAutoBreadcrumbTracking = enableAutoNativeBreadcrumbs
         }
 
-        if let enableNativeCrashHandling = arguments["enableNativeCrashHandling"] as? Bool,
-           enableNativeCrashHandling == false {
-            options.integrations = options.integrations?.filter { (name) -> Bool in
-                name != "SentryCrashIntegration"
-            }
+        if let enableNativeCrashHandling = arguments["enableNativeCrashHandling"] as? Bool {
+            options.enableCrashHandler = enableNativeCrashHandling
         }
 
         if let maxBreadcrumbs = arguments["maxBreadcrumbs"] as? UInt {
@@ -311,12 +365,24 @@ public class SentryFlutterPluginApple: NSObject, FlutterPlugin {
             options.maxCacheItems = maxCacheItems
         }
 
-        if let enableOutOfMemoryTracking = arguments["enableOutOfMemoryTracking"] as? Bool {
-            options.enableOutOfMemoryTracking = enableOutOfMemoryTracking
+        if let enableWatchdogTerminationTracking = arguments["enableWatchdogTerminationTracking"] as? Bool {
+            options.enableWatchdogTerminationTracking = enableWatchdogTerminationTracking
         }
 
         if let sendClientReports = arguments["sendClientReports"] as? Bool {
             options.sendClientReports = sendClientReports
+        }
+
+        if let maxAttachmentSize = arguments["maxAttachmentSize"] as? UInt {
+            options.maxAttachmentSize = maxAttachmentSize
+        }
+
+        if let captureFailedRequests = arguments["captureFailedRequests"] as? Bool {
+            options.enableCaptureFailedRequests = captureFailedRequests
+        }
+
+        if let enableAppHangTracking = arguments["enableAppHangTracking"] as? Bool {
+            options.enableAppHangTracking = enableAppHangTracking
         }
     }
 
@@ -344,7 +410,7 @@ public class SentryFlutterPluginApple: NSObject, FlutterPlugin {
         if isValidSdk(sdk: sdk) {
 
             switch sdk["name"] as? String {
-            case "sentry.cocoa":
+            case SentryFlutterPluginApple.nativeClientName:
                 #if os(OSX)
                     let origin = "mac"
                 #elseif os(watchOS)
@@ -502,24 +568,7 @@ public class SentryFlutterPluginApple: NSObject, FlutterPlugin {
 
     private func setUser(user: [String: Any?]?, result: @escaping FlutterResult) {
       if let user = user {
-        let userInstance = User()
-
-        if let email = user["email"] as? String {
-          userInstance.email = email
-        }
-        if let id = user["id"] as? String {
-          userInstance.userId = id
-        }
-        if let username = user["username"] as? String {
-          userInstance.username = username
-        }
-        if let ipAddress = user["ip_address"] as? String {
-          userInstance.ipAddress = ipAddress
-        }
-        if let extras = user["extras"] as? [String: Any] {
-          userInstance.data = extras
-        }
-
+        let userInstance = PrivateSentrySDKOnly.user(with: user)
         SentrySDK.setUser(userInstance)
       } else {
         SentrySDK.setUser(nil)
@@ -527,46 +576,11 @@ public class SentryFlutterPluginApple: NSObject, FlutterPlugin {
       result("")
     }
 
-    // swiftlint:disable:next cyclomatic_complexity
     private func addBreadcrumb(breadcrumb: [String: Any?]?, result: @escaping FlutterResult) {
-      guard let breadcrumb = breadcrumb else {
-        result("")
-        return
+      if let breadcrumb = breadcrumb {
+        let breadcrumbInstance = PrivateSentrySDKOnly.breadcrumb(with: breadcrumb)
+        SentrySDK.addBreadcrumb(breadcrumbInstance)
       }
-
-      let breadcrumbInstance = Breadcrumb()
-
-      if let message = breadcrumb["message"] as? String {
-        breadcrumbInstance.message = message
-      }
-      if let type = breadcrumb["type"] as? String {
-        breadcrumbInstance.type = type
-      }
-      if let category = breadcrumb["category"] as? String {
-        breadcrumbInstance.category = category
-      }
-      if let level = breadcrumb["level"] as? String {
-        switch level {
-        case "fatal":
-          breadcrumbInstance.level = SentryLevel.fatal
-        case "warning":
-          breadcrumbInstance.level = SentryLevel.warning
-        case "info":
-          breadcrumbInstance.level = SentryLevel.info
-        case "debug":
-          breadcrumbInstance.level = SentryLevel.debug
-        case "error":
-          breadcrumbInstance.level = SentryLevel.error
-        default:
-          breadcrumbInstance.level = SentryLevel.error
-        }
-      }
-      if let data = breadcrumb["data"] as? [String: Any] {
-        breadcrumbInstance.data = data
-      }
-
-      SentrySDK.addBreadcrumb(crumb: breadcrumbInstance)
-
       result("")
     }
 
@@ -626,3 +640,5 @@ public class SentryFlutterPluginApple: NSObject, FlutterPlugin {
       }
     }
 }
+
+// swiftlint:enable function_body_length

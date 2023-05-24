@@ -1,3 +1,5 @@
+// ignore_for_file: library_private_types_in_public_api
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -6,6 +8,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:logging/logging.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
+import 'package:sentry_sqflite/sentry_sqflite.dart';
+import 'package:sqflite/sqflite.dart';
+// import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+// import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
 import 'package:universal_platform/universal_platform.dart';
 import 'package:feedback/feedback.dart' as feedback;
 import 'package:provider/provider.dart';
@@ -16,37 +22,55 @@ import 'package:sentry_logging/sentry_logging.dart';
 
 // ATTENTION: Change the DSN below with your own to see the events in Sentry. Get one at sentry.io
 const String _exampleDsn =
-    'https://9934c532bf8446ef961450973c898537@o447951.ingest.sentry.io/5428562';
+    'https://e85b375ffb9f43cf8bdf9787768149e0@o447951.ingest.sentry.io/5428562';
 
-final _channel = const MethodChannel('example.flutter.sentry.io');
+const _channel = MethodChannel('example.flutter.sentry.io');
 
 Future<void> main() async {
-  await SentryFlutter.init(
-    (options) {
-      options.dsn = _exampleDsn;
-      options.tracesSampleRate = 1.0;
-      options.reportPackages = false;
-      options.addInAppInclude('sentry_flutter_example');
-      options.considerInAppFramesByDefault = false;
-      options.attachThreads = true;
-      options.enableWindowMetricBreadcrumbs = true;
-      options.addIntegration(LoggingIntegration());
-      // We can enable Sentry debug logging during development. This is likely
-      // going to log too much for your app, but can be useful when figuring out
-      // configuration issues, e.g. finding out why your events are not uploaded.
-      options.debug = true;
-    },
-    // Init your App.
-    appRunner: () => runApp(
-      DefaultAssetBundle(
-        bundle: SentryAssetBundle(enableStructuredDataTracing: true),
-        child: MyApp(),
-      ),
-    ),
-  );
+  await setupSentry(
+      () => runApp(
+            SentryScreenshotWidget(
+              child: SentryUserInteractionWidget(
+                child: DefaultAssetBundle(
+                  bundle: SentryAssetBundle(),
+                  child: const MyApp(),
+                ),
+              ),
+            ),
+          ),
+      _exampleDsn);
+}
+
+Future<void> setupSentry(AppRunner appRunner, String dsn) async {
+  await SentryFlutter.init((options) {
+    options.dsn = _exampleDsn;
+    options.tracesSampleRate = 1.0;
+    options.reportPackages = false;
+    options.addInAppInclude('sentry_flutter_example');
+    options.considerInAppFramesByDefault = false;
+    options.attachThreads = true;
+    options.enableWindowMetricBreadcrumbs = true;
+    options.addIntegration(LoggingIntegration(minEventLevel: Level.INFO));
+    options.sendDefaultPii = true;
+    options.reportSilentFlutterErrors = true;
+    options.attachScreenshot = true;
+    options.screenshotQuality = SentryScreenshotQuality.low;
+    options.attachViewHierarchy = true;
+    // We can enable Sentry debug logging during development. This is likely
+    // going to log too much for your app, but can be useful when figuring out
+    // configuration issues, e.g. finding out why your events are not uploaded.
+    options.debug = true;
+
+    options.maxRequestBodySize = MaxRequestBodySize.always;
+    options.maxResponseBodySize = MaxResponseBodySize.always;
+  },
+      // Init your App.
+      appRunner: appRunner);
 }
 
 class MyApp extends StatefulWidget {
+  const MyApp({Key? key}) : super(key: key);
+
   @override
   _MyAppState createState() => _MyAppState();
 }
@@ -97,15 +121,15 @@ class MainScaffold extends StatelessWidget {
           ),
           IconButton(
             onPressed: () {
-              themeProvider.updatePrimatryColor(Colors.orange);
+              themeProvider.updatePrimaryColor(Colors.orange);
             },
-            icon: Icon(Icons.circle, color: Colors.orange),
+            icon: const Icon(Icons.circle, color: Colors.orange),
           ),
           IconButton(
             onPressed: () {
-              themeProvider.updatePrimatryColor(Colors.green);
+              themeProvider.updatePrimaryColor(Colors.green);
             },
-            icon: Icon(Icons.circle, color: Colors.lime),
+            icon: const Icon(Icons.circle, color: Colors.lime),
           ),
         ],
       ),
@@ -114,11 +138,16 @@ class MainScaffold extends StatelessWidget {
           children: [
             const Center(child: Text('Trigger an action:\n')),
             ElevatedButton(
+              onPressed: () => sqfliteTest(),
+              child: const Text('sqflite'),
+            ),
+            ElevatedButton(
               onPressed: () => SecondaryScaffold.openSecondaryScaffold(context),
               child: const Text('Open another Scaffold'),
             ),
             ElevatedButton(
               onPressed: () => tryCatch(),
+              key: const Key('dart_try_catch'),
               child: const Text('Dart: try catch'),
             ),
             ElevatedButton(
@@ -162,7 +191,7 @@ class MainScaffold extends StatelessWidget {
             ),
             ElevatedButton(
               onPressed: () => Future.delayed(
-                Duration(milliseconds: 100),
+                const Duration(milliseconds: 100),
                 () => throw Exception('Throws in Future.delayed'),
               ),
               child: const Text('Throws in Future.delayed'),
@@ -202,6 +231,17 @@ class MainScaffold extends StatelessWidget {
               child: const Text('Capture from PlatformDispatcher.onError'),
             ),
             ElevatedButton(
+              key: const Key('view hierarchy'),
+              onPressed: () => {},
+              child: const Visibility(
+                visible: true,
+                child: Opacity(
+                  opacity: 0.5,
+                  child: Text('view hierarchy'),
+                ),
+              ),
+            ),
+            ElevatedButton(
               onPressed: () => makeWebRequest(context),
               child: const Text('Dart: Web request'),
             ),
@@ -210,11 +250,13 @@ class MainScaffold extends StatelessWidget {
               child: const Text('Flutter: Load assets'),
             ),
             ElevatedButton(
-              onPressed: () => makeWebRequestWithDio(context),
+              key: const Key('dio_web_request'),
+              onPressed: () async => await makeWebRequestWithDio(context),
               child: const Text('Dio: Web request'),
             ),
             ElevatedButton(
               onPressed: () {
+                // ignore: avoid_print
                 print('A print breadcrumb');
                 Sentry.captureMessage('A message with a print() Breadcrumb');
               },
@@ -243,7 +285,7 @@ class MainScaffold extends StatelessWidget {
                 transaction.setTag('myTag', 'myValue');
                 transaction.setData('myExtra', 'myExtraValue');
 
-                await Future.delayed(Duration(milliseconds: 50));
+                await Future.delayed(const Duration(milliseconds: 50));
 
                 final span = transaction.startChild(
                   'childOfMyOp',
@@ -252,29 +294,30 @@ class MainScaffold extends StatelessWidget {
                 span.setTag('myNewTag', 'myNewValue');
                 span.setData('myNewData', 'myNewDataValue');
 
-                await Future.delayed(Duration(milliseconds: 70));
+                await Future.delayed(const Duration(milliseconds: 70));
 
-                await span.finish(status: SpanStatus.resourceExhausted());
+                await span.finish(status: const SpanStatus.resourceExhausted());
 
-                await Future.delayed(Duration(milliseconds: 90));
+                await Future.delayed(const Duration(milliseconds: 90));
 
                 final spanChild = span.startChild(
                   'childOfChildOfMyOp',
                   description: 'childOfChildOfMyOp span',
                 );
 
-                await Future.delayed(Duration(milliseconds: 110));
+                await Future.delayed(const Duration(milliseconds: 110));
 
                 spanChild.startChild(
                   'unfinishedChild',
                   description: 'I wont finish',
                 );
 
-                await spanChild.finish(status: SpanStatus.internalError());
+                await spanChild.finish(
+                    status: const SpanStatus.internalError());
 
-                await Future.delayed(Duration(milliseconds: 50));
+                await Future.delayed(const Duration(milliseconds: 50));
 
-                await transaction.finish(status: SpanStatus.ok());
+                await transaction.finish(status: const SpanStatus.ok());
               },
               child: const Text('Capture transaction'),
             ),
@@ -283,7 +326,7 @@ class MainScaffold extends StatelessWidget {
                 Sentry.captureMessage(
                   'This message has an attachment',
                   withScope: (scope) {
-                    final txt = 'Lorem Ipsum dolar sit amet';
+                    const txt = 'Lorem Ipsum dolar sit amet';
                     scope.addAttachment(
                       SentryAttachment.fromIntList(
                         utf8.encode(txt),
@@ -325,6 +368,12 @@ class MainScaffold extends StatelessWidget {
             ElevatedButton(
               onPressed: () async {
                 final id = await Sentry.captureMessage('UserFeedback');
+                // ignore: use_build_context_synchronously
+                if (!context.isMounted) {
+                  return;
+                }
+
+                // ignore: use_build_context_synchronously
                 await showDialog(
                   context: context,
                   builder: (context) {
@@ -345,6 +394,13 @@ class MainScaffold extends StatelessWidget {
               },
               child: const Text('Show UserFeedback Dialog without event'),
             ),
+            ElevatedButton(
+              onPressed: () {
+                final log = Logger('Logging');
+                log.info('My Logging test');
+              },
+              child: const Text('Logging'),
+            ),
             if (UniversalPlatform.isIOS || UniversalPlatform.isMacOS)
               const CocoaExample(),
             if (UniversalPlatform.isAndroid) const AndroidExample(),
@@ -352,6 +408,63 @@ class MainScaffold extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> sqfliteTest() async {
+    final tr = Sentry.startTransaction(
+      'sqfliteTest',
+      'db',
+      bindToScope: true,
+    );
+
+    // databaseFactory = databaseFactoryFfiWeb; // or databaseFactoryFfi // or SentrySqfliteDatabaseFactory()
+
+    // final sqfDb = await openDatabase(inMemoryDatabasePath);
+    final db = await openDatabaseWithSentry(inMemoryDatabasePath);
+    // final db = SentryDatabase(sqfDb);
+    // final batch = db.batch();
+    await db.execute('''
+      CREATE TABLE Product (
+        id INTEGER PRIMARY KEY,
+        title TEXT
+      )
+  ''');
+    final dbTitles = <String>[];
+    for (int i = 1; i <= 20; i++) {
+      final title = 'Product $i';
+      dbTitles.add(title);
+      await db.insert('Product', <String, Object?>{'title': title});
+    }
+
+    await db.query('Product');
+
+    await db.transaction((txn) async {
+      await txn
+          .insert('Product', <String, Object?>{'title': 'Product Another one'});
+      await txn.delete('Product',
+          where: 'title = ?', whereArgs: ['Product Another one']);
+    });
+
+    await db.delete('Product', where: 'title = ?', whereArgs: ['Product 1']);
+
+    // final batch = db.batch();
+    // batch.delete('Product', where: 'title = ?', whereArgs: dbTitles);
+    // await batch.commit();
+
+    await db.close();
+
+    await tr.finish(status: const SpanStatus.ok());
+  }
+}
+
+extension BuildContextExtension on BuildContext {
+  bool get isMounted {
+    try {
+      return (this as dynamic).mounted;
+    } on NoSuchMethodError catch (_) {
+      // ignore, only available in newer Flutter versions
+    }
+    return true;
   }
 }
 
@@ -397,13 +510,6 @@ class AndroidExample extends StatelessWidget {
           await execute('platform_exception');
         },
         child: const Text('Platform exception'),
-      ),
-      ElevatedButton(
-        onPressed: () {
-          final log = Logger('Logging');
-          log.info('My Logging test');
-        },
-        child: const Text('Logging'),
       ),
     ]);
   }
@@ -475,6 +581,8 @@ int loop(int val) {
 }
 
 class SecondaryScaffold extends StatelessWidget {
+  const SecondaryScaffold({Key? key}) : super(key: key);
+
   static Future<void> openSecondaryScaffold(BuildContext context) {
     return Navigator.push(
       context,
@@ -482,7 +590,7 @@ class SecondaryScaffold extends StatelessWidget {
         settings:
             const RouteSettings(name: 'SecondaryScaffold', arguments: 'foobar'),
         builder: (context) {
-          return SecondaryScaffold();
+          return const SecondaryScaffold();
         },
       ),
     );
@@ -529,21 +637,24 @@ Future<void> makeWebRequest(BuildContext context) async {
       );
 
   final client = SentryHttpClient(
-    captureFailedRequests: true,
-    maxRequestBodySize: MaxRequestBodySize.always,
-    networkTracing: true,
     failedRequestStatusCodes: [SentryStatusCode.range(400, 500)],
   );
   // We don't do any exception handling here.
   // In case of an exception, let it get caught and reported to Sentry
   final response = await client.get(Uri.parse('https://flutter.dev/'));
 
-  await transaction.finish(status: SpanStatus.ok());
+  await transaction.finish(status: const SpanStatus.ok());
 
+  // ignore: use_build_context_synchronously
+  if (!context.isMounted) {
+    return;
+  }
+
+  // ignore: use_build_context_synchronously
   await showDialog<void>(
     context: context,
     // gets tracked if using SentryNavigatorObserver
-    routeSettings: RouteSettings(
+    routeSettings: const RouteSettings(
       name: 'flutter.dev dialog',
     ),
     builder: (context) {
@@ -565,11 +676,7 @@ Future<void> makeWebRequest(BuildContext context) async {
 
 Future<void> makeWebRequestWithDio(BuildContext context) async {
   final dio = Dio();
-
-  dio.addSentry(
-    captureFailedRequests: true,
-    maxRequestBodySize: MaxRequestBodySize.always,
-  );
+  dio.addSentry();
 
   final transaction = Sentry.getSpan() ??
       Sentry.startTransaction(
@@ -577,22 +684,32 @@ Future<void> makeWebRequestWithDio(BuildContext context) async {
         'request',
         bindToScope: true,
       );
+  final span = transaction.startChild(
+    'dio',
+    description: 'desc',
+  );
   Response<String>? response;
   try {
     response = await dio.get<String>('https://flutter.dev/');
-    transaction.status = SpanStatus.ok();
+    span.status = const SpanStatus.ok();
   } catch (exception, stackTrace) {
-    transaction.throwable = exception;
-    transaction.status = SpanStatus.internalError();
+    span.throwable = exception;
+    span.status = const SpanStatus.internalError();
     await Sentry.captureException(exception, stackTrace: stackTrace);
   } finally {
-    await transaction.finish();
+    await span.finish();
   }
 
+  // ignore: use_build_context_synchronously
+  if (!context.isMounted) {
+    return;
+  }
+
+  // ignore: use_build_context_synchronously
   await showDialog<void>(
     context: context,
     // gets tracked if using SentryNavigatorObserver
-    routeSettings: RouteSettings(
+    routeSettings: const RouteSettings(
       name: 'flutter.dev dialog',
     ),
     builder: (context) {
@@ -621,15 +738,22 @@ Future<void> showDialogWithTextAndImage(BuildContext context) async {
       );
   final text =
       await DefaultAssetBundle.of(context).loadString('assets/lorem-ipsum.txt');
+
+  // ignore: use_build_context_synchronously
+  if (!context.isMounted) {
+    return;
+  }
+
+  // ignore: use_build_context_synchronously
   await showDialog<void>(
     context: context,
     // gets tracked if using SentryNavigatorObserver
-    routeSettings: RouteSettings(
+    routeSettings: const RouteSettings(
       name: 'AssetBundle dialog',
     ),
     builder: (context) {
       return AlertDialog(
-        title: Text('Asset Example'),
+        title: const Text('Asset Example'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -642,13 +766,13 @@ Future<void> showDialogWithTextAndImage(BuildContext context) async {
         actions: [
           MaterialButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('Close'),
+            child: const Text('Close'),
           )
         ],
       );
     },
   );
-  await transaction.finish(status: SpanStatus.ok());
+  await transaction.finish(status: const SpanStatus.ok());
 }
 
 class ThemeProvider extends ChangeNotifier {
@@ -661,7 +785,7 @@ class ThemeProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void updatePrimatryColor(MaterialColor color) {
+  void updatePrimaryColor(MaterialColor color) {
     if (theme.brightness == Brightness.light) {
       theme = ThemeData(primarySwatch: color, brightness: theme.brightness);
     } else {
@@ -671,5 +795,5 @@ class ThemeProvider extends ChangeNotifier {
 }
 
 Future<void> execute(String method) async {
-  await _channel.invokeMethod<void>(method);
+  await _channel.invokeMethod(method);
 }

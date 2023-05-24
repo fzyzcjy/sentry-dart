@@ -1,24 +1,27 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:meta/meta.dart';
-import 'package:package_info_plus/package_info_plus.dart';
-import 'package:sentry/sentry.dart';
+import '../sentry_flutter.dart';
 import 'event_processor/android_platform_exception_event_processor.dart';
+import 'event_processor/flutter_exception_event_processor.dart';
+import 'event_processor/platform_exception_event_processor.dart';
+import 'integrations/screenshot_integration.dart';
 import 'native_scope_observer.dart';
+import 'renderer/renderer.dart';
 import 'sentry_native.dart';
 import 'sentry_native_channel.dart';
 
-import 'flutter_enricher_event_processor.dart';
-import 'integrations/debug_print_integration.dart';
-import 'integrations/native_app_start_integration.dart';
-import 'sentry_flutter_options.dart';
+import 'integrations/integrations.dart';
+import 'event_processor/flutter_enricher_event_processor.dart';
 
-import 'default_integrations.dart';
 import 'file_system_transport.dart';
 
 import 'version.dart';
+import 'view_hierarchy/view_hierarchy_integration.dart';
 
 /// Configuration options callback
 typedef FlutterOptionsConfiguration = FutureOr<void> Function(
@@ -31,26 +34,45 @@ mixin SentryFlutter {
   static Future<void> init(
     FlutterOptionsConfiguration optionsConfiguration, {
     AppRunner? appRunner,
-    @internal PackageLoader packageLoader = _loadPackageInfo,
     @internal MethodChannel channel = _channel,
     @internal PlatformChecker? platformChecker,
+    @internal RendererWrapper? rendererWrapper,
   }) async {
     final flutterOptions = SentryFlutterOptions();
 
     if (platformChecker != null) {
       flutterOptions.platformChecker = platformChecker;
     }
+    if (rendererWrapper != null) {
+      flutterOptions.rendererWrapper = rendererWrapper;
+    }
 
     final nativeChannel = SentryNativeChannel(channel, flutterOptions);
-    final native = SentryNative();
-    native.setNativeChannel(nativeChannel);
+    if (flutterOptions.platformChecker.hasNativeIntegration) {
+      final native = SentryNative();
+      native.nativeChannel = nativeChannel;
+    }
+
+    final platformDispatcher = PlatformDispatcher.instance;
+    final wrapper = PlatformDispatcherWrapper(platformDispatcher);
+
+    // Flutter Web don't capture [Future] errors if using [PlatformDispatcher.onError] and not
+    // the [runZonedGuarded].
+    // likely due to https://github.com/flutter/flutter/issues/100277
+    final isOnErrorSupported = flutterOptions.platformChecker.isWeb
+        ? false
+        : wrapper.isOnErrorSupported(flutterOptions);
+
+    final runZonedGuardedOnError = flutterOptions.platformChecker.isWeb
+        ? _createRunZonedGuardedOnError()
+        : null;
 
     // first step is to install the native integration and set default values,
     // so we are able to capture future errors.
     final defaultIntegrations = _createDefaultIntegrations(
-      packageLoader,
       channel,
       flutterOptions,
+      isOnErrorSupported,
     );
     for (final defaultIntegration in defaultIntegrations) {
       flutterOptions.addIntegration(defaultIntegration);
@@ -65,6 +87,10 @@ mixin SentryFlutter {
       appRunner: appRunner,
       // ignore: invalid_use_of_internal_member
       options: flutterOptions,
+      // ignore: invalid_use_of_internal_member
+      callAppRunnerInRunZonedGuarded: !isOnErrorSupported,
+      // ignore: invalid_use_of_internal_member
+      runZonedGuardedOnError: runZonedGuardedOnError,
     );
   }
 
@@ -72,20 +98,23 @@ mixin SentryFlutter {
     SentryFlutterOptions options,
     MethodChannel channel,
   ) async {
+    options.addEventProcessor(FlutterExceptionEventProcessor());
+
     // Not all platforms have a native integration.
     if (options.platformChecker.hasNativeIntegration) {
       options.transport = FileSystemTransport(channel, options);
+      options.addScopeObserver(NativeScopeObserver(SentryNative()));
     }
 
-    var flutterEventProcessor =
-        FlutterEnricherEventProcessor.simple(options: options);
+    var flutterEventProcessor = FlutterEnricherEventProcessor(options);
     options.addEventProcessor(flutterEventProcessor);
 
     if (options.platformChecker.platform.isAndroid) {
       options
           .addEventProcessor(AndroidPlatformExceptionEventProcessor(options));
-      options.addScopeObserver(NativeScopeObserver(SentryNative()));
     }
+
+    options.addEventProcessor(PlatformExceptionEventProcessor());
 
     _setSdk(options);
   }
@@ -93,9 +122,9 @@ mixin SentryFlutter {
   /// Install default integrations
   /// https://medium.com/flutter-community/error-handling-in-flutter-98fce88a34f0
   static List<Integration> _createDefaultIntegrations(
-    PackageLoader packageLoader,
     MethodChannel channel,
     SentryFlutterOptions options,
+    bool isOnErrorSupported,
   ) {
     final integrations = <Integration>[];
     final platformChecker = options.platformChecker;
@@ -103,6 +132,11 @@ mixin SentryFlutter {
 
     // Will call WidgetsFlutterBinding.ensureInitialized() before all other integrations.
     integrations.add(WidgetsFlutterBindingIntegration());
+
+    // Use PlatformDispatcher.onError instead of zones.
+    if (isOnErrorSupported) {
+      integrations.add(OnErrorIntegration());
+    }
 
     // Will catch any errors that may occur in the Flutter framework itself.
     integrations.add(FlutterErrorIntegration());
@@ -129,13 +163,21 @@ mixin SentryFlutter {
         (platform.isAndroid || platform.isIOS || platform.isMacOS)) {
       integrations.add(LoadImageListIntegration(channel));
     }
+    final renderer = options.rendererWrapper.getRenderer();
+    if (renderer == FlutterRenderer.skia ||
+        renderer == FlutterRenderer.canvasKit) {
+      integrations.add(ScreenshotIntegration());
+    }
+
+    // works with Skia, CanvasKit and HTML renderer
+    integrations.add(SentryViewHierarchyIntegration());
 
     integrations.add(DebugPrintIntegration());
 
     // This is an Integration because we want to execute it after all the
     // error handlers are in place. Calling a MethodChannel might result
     // in errors.
-    integrations.add(LoadReleaseIntegration(packageLoader));
+    integrations.add(LoadReleaseIntegration());
 
     if (platformChecker.hasNativeIntegration) {
       integrations.add(NativeAppStartIntegration(
@@ -150,6 +192,16 @@ mixin SentryFlutter {
       ));
     }
     return integrations;
+  }
+
+  static RunZonedGuardedOnError _createRunZonedGuardedOnError() {
+    return (Object error, StackTrace stackTrace) async {
+      final errorDetails = FlutterErrorDetails(
+        exception: error,
+        stack: stackTrace,
+      );
+      FlutterError.dumpErrorToConsole(errorDetails, forceReport: true);
+    };
   }
 
   /// Manually set when your app finished startup. Make sure to set
@@ -169,9 +221,4 @@ mixin SentryFlutter {
     sdk.addPackage('pub:sentry_flutter', sdkVersion);
     options.sdk = sdk;
   }
-}
-
-/// Package info loader.
-Future<PackageInfo> _loadPackageInfo() async {
-  return await PackageInfo.fromPlatform();
 }

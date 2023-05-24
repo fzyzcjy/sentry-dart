@@ -7,6 +7,7 @@ final event = SentryEvent(
   environment: 'Test',
   message: SentryMessage('This is an example Dart event.'),
   tags: const <String, String>{'project-id': '7371'},
+  // ignore: deprecated_member_use, deprecated_member_use_from_same_package
   extra: const <String, String>{'section': '1'},
   // fingerprint: const <String>['example-dart'],
   user: SentryUser(
@@ -14,7 +15,7 @@ final event = SentryEvent(
     username: 'first-user',
     email: 'first@user.lan',
     // ipAddress: '127.0.0.1',
-    extras: <String, String>{'first-sign-in': '2020-01-01'},
+    data: <String, String>{'first-sign-in': '2020-01-01'},
   ),
   breadcrumbs: [
     Breadcrumb(
@@ -56,7 +57,6 @@ final event = SentryEvent(
       orientation: SentryOrientation.landscape,
       manufacturer: 'samsung',
       brand: 'samsung',
-      screenResolution: '2560x1600',
       screenDensity: 2.1,
       screenDpi: 320,
       online: true,
@@ -71,7 +71,6 @@ final event = SentryEvent(
       externalStorageSize: 8589934592,
       externalFreeStorage: 2863311530,
       bootTime: DateTime.now().toUtc(),
-      timezone: 'America/Toronto',
     ),
   ),
 );

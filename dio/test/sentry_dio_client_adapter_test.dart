@@ -1,6 +1,4 @@
 import 'package:dio/dio.dart';
-import 'package:http/http.dart';
-import 'package:mockito/mockito.dart';
 import 'package:sentry/sentry.dart';
 import 'package:sentry_dio/src/sentry_dio_client_adapter.dart';
 import 'package:test/test.dart';
@@ -47,23 +45,17 @@ void main() {
     });
 
     test('close does get called for user defined client', () async {
-      final mockHub = MockHub();
+      final client = createCloseClient();
+      final sut = fixture.getSut(client: client);
 
-      final mockClient = CloseableMockClient();
-
-      final client = SentryHttpClient(client: mockClient, hub: mockHub);
-      client.close();
-
-      expect(mockHub.addBreadcrumbCalls.length, 0);
-      expect(mockHub.captureExceptionCalls.length, 0);
-      verify(mockClient.close());
+      sut.close(force: true);
     });
 
     test('no captured span if tracing disabled', () async {
+      fixture.hub.options.captureFailedRequests = false;
+      fixture.hub.options.recordHttpBreadcrumbs = false;
       final sut = fixture.getSut(
         client: fixture.getClient(statusCode: 200, reason: 'OK'),
-        recordBreadcrumbs: false,
-        networkTracing: false,
       );
 
       final response = await sut.get<dynamic>('/');
@@ -73,16 +65,15 @@ void main() {
     });
 
     test('captured span if tracing enabled', () async {
+      fixture.hub.options.recordHttpBreadcrumbs = false;
       final sut = fixture.getSut(
         client: fixture.getClient(statusCode: 200, reason: 'OK'),
-        recordBreadcrumbs: false,
-        networkTracing: true,
       );
 
       final response = await sut.get<dynamic>('/');
       expect(response.statusCode, 200);
 
-      expect(fixture.hub.getSpanCalls, 1);
+      expect(fixture.hub.getSpanCalls, 0);
     });
   });
 }
@@ -96,24 +87,32 @@ MockHttpClientAdapter createThrowingClient() {
   );
 }
 
-class CloseableMockClient extends Mock implements BaseClient {}
+void _close({bool force = false}) {
+  expect(force, true);
+}
+
+MockHttpClientAdapter createCloseClient() {
+  return MockHttpClientAdapter(
+    (_, __, ___) async {
+      return ResponseBody.fromString('', 200);
+    },
+    mockCloseMethod: _close,
+  );
+}
 
 class Fixture {
   Dio getSut({
     MockHttpClientAdapter? client,
-    bool captureFailedRequests = false,
     MaxRequestBodySize maxRequestBodySize = MaxRequestBodySize.never,
     List<SentryStatusCode> badStatusCodes = const [],
-    bool recordBreadcrumbs = true,
-    bool networkTracing = false,
+    bool captureFailedRequests = true,
   }) {
     final mc = client ?? getClient();
     final dio = Dio(BaseOptions(baseUrl: requestUri.toString()));
+    hub.options.captureFailedRequests = captureFailedRequests;
     dio.httpClientAdapter = SentryDioClientAdapter(
       client: mc,
       hub: hub,
-      recordBreadcrumbs: recordBreadcrumbs,
-      networkTracing: networkTracing,
     );
     return dio;
   }
@@ -121,10 +120,12 @@ class Fixture {
   final MockHub hub = MockHub();
 
   MockHttpClientAdapter getClient({int statusCode = 200, String? reason}) {
-    return MockHttpClientAdapter((options, _, __) async {
-      expect(options.uri, requestUri);
-      return ResponseBody.fromString('', statusCode);
-    });
+    return MockHttpClientAdapter(
+      (options, _, __) async {
+        expect(options.uri, requestUri);
+        return ResponseBody.fromString('', statusCode);
+      },
+    );
   }
 }
 

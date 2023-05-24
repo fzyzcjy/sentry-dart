@@ -2,12 +2,15 @@ import 'dart:async';
 import 'dart:collection';
 
 import 'event_processor.dart';
+import 'hint.dart';
 import 'protocol.dart';
 import 'scope_observer.dart';
 import 'sentry_attachment/sentry_attachment.dart';
 import 'sentry_options.dart';
 import 'sentry_span_interface.dart';
 import 'sentry_tracer.dart';
+
+typedef _OnScopeObserver = Future<void> Function(ScopeObserver observer);
 
 /// Scope data to be sent with the event
 class Scope {
@@ -19,49 +22,27 @@ class Scope {
   /// The name of the transaction which generated this event,
   /// for example, the route name: `"/users/<username>/"`.
   String? get transaction {
-    return ((_span is SentryTracer) ? (_span as SentryTracer?)?.name : null) ??
+    return ((span is SentryTracer) ? (span as SentryTracer?)?.name : null) ??
         _transaction;
   }
 
   set transaction(String? transaction) {
     _transaction = transaction;
 
-    if (_transaction != null && _span != null) {
+    if (_transaction != null && span != null) {
       final currentTransaction =
-          (_span is SentryTracer) ? (_span as SentryTracer?) : null;
+          (span is SentryTracer) ? (span as SentryTracer?) : null;
       currentTransaction?.name = _transaction!;
     }
   }
 
-  ISentrySpan? _span;
-
   /// Returns active transaction or null if there is no active transaction.
-  ISentrySpan? get span => _span;
-
-  set span(ISentrySpan? span) {
-    _span = span;
-
-    if (_span != null) {
-      final currentTransaction =
-          (_span is SentryTracer) ? (_span as SentryTracer?) : null;
-      _transaction = currentTransaction?.name ?? _transaction;
-    }
-  }
+  ISentrySpan? span;
 
   SentryUser? _user;
 
   /// Get the current user.
   SentryUser? get user => _user;
-
-  /// Sets the current user
-  /// This method is deprecated, use the [setUser(user)] instead.
-  /// This method will be removed in the future.
-  /// The breaking change is due to the [enableScopeSync] feature that
-  /// requires returning a [Future].
-  @Deprecated('Use [setUser(user)] instead')
-  set user(SentryUser? user) {
-    _user = user;
-  }
 
   void _setUserSync(SentryUser? user) {
     _user = user;
@@ -160,49 +141,58 @@ class Scope {
 
   List<SentryAttachment> get attachments => List.unmodifiable(_attachments);
 
-  @Deprecated('Use [attachments] instead')
-  List<SentryAttachment> get attachements => attachments;
-
   Scope(this._options);
 
-  bool _addBreadCrumbSync(Breadcrumb breadcrumb, {dynamic hint}) {
+  Breadcrumb? _addBreadCrumbSync(Breadcrumb breadcrumb, {Hint? hint}) {
     // bail out if maxBreadcrumbs is zero
     if (_options.maxBreadcrumbs == 0) {
-      return false;
+      return null;
     }
 
     Breadcrumb? processedBreadcrumb = breadcrumb;
     // run before breadcrumb callback if set
     if (_options.beforeBreadcrumb != null) {
-      processedBreadcrumb = _options.beforeBreadcrumb!(
-        processedBreadcrumb,
-        hint: hint,
-      );
-
-      if (processedBreadcrumb == null) {
-        _options.logger(
-          SentryLevel.info,
-          'Breadcrumb was dropped by beforeBreadcrumb',
+      try {
+        processedBreadcrumb = _options.beforeBreadcrumb!(
+          processedBreadcrumb,
+          hint: hint,
         );
-        return false;
+        if (processedBreadcrumb == null) {
+          _options.logger(
+            SentryLevel.info,
+            'Breadcrumb was dropped by beforeBreadcrumb',
+          );
+          return null;
+        }
+      } catch (exception, stackTrace) {
+        _options.logger(
+          SentryLevel.error,
+          'The BeforeBreadcrumb callback threw an exception',
+          exception: exception,
+          stackTrace: stackTrace,
+        );
+        if (_options.devMode) {
+          rethrow;
+        }
       }
     }
-
-    // remove first item if list is full
-    if (_breadcrumbs.length >= _options.maxBreadcrumbs &&
-        _breadcrumbs.isNotEmpty) {
-      _breadcrumbs.removeFirst();
+    if (processedBreadcrumb != null) {
+      // remove first item if list is full
+      if (_breadcrumbs.length >= _options.maxBreadcrumbs &&
+          _breadcrumbs.isNotEmpty) {
+        _breadcrumbs.removeFirst();
+      }
+      _breadcrumbs.add(processedBreadcrumb);
     }
-
-    _breadcrumbs.add(processedBreadcrumb);
-    return true;
+    return processedBreadcrumb;
   }
 
   /// Adds a breadcrumb to the breadcrumbs queue
-  Future<void> addBreadcrumb(Breadcrumb breadcrumb, {dynamic hint}) async {
-    if (_addBreadCrumbSync(breadcrumb, hint: hint)) {
+  Future<void> addBreadcrumb(Breadcrumb breadcrumb, {Hint? hint}) async {
+    final addedBreadcrumb = _addBreadCrumbSync(breadcrumb, hint: hint);
+    if (addedBreadcrumb != null) {
       await _callScopeObservers((scopeObserver) async =>
-          await scopeObserver.addBreadcrumb(breadcrumb));
+          await scopeObserver.addBreadcrumb(addedBreadcrumb));
     }
   }
 
@@ -234,7 +224,7 @@ class Scope {
   Future<void> clear() async {
     clearAttachments();
     level = null;
-    _span = null;
+    span = null;
     _transaction = null;
     _fingerprint = [];
     _tags.clear();
@@ -286,15 +276,16 @@ class Scope {
 
   Future<SentryEvent?> applyToEvent(
     SentryEvent event, {
-    dynamic hint,
+    Hint? hint,
   }) async {
     event = event.copyWith(
-      transaction: event.transaction ?? _transaction,
+      transaction: event.transaction ?? transaction,
       user: _mergeUsers(user, event.user),
       breadcrumbs: (event.breadcrumbs?.isNotEmpty ?? false)
           ? event.breadcrumbs
           : List.from(_breadcrumbs),
       tags: tags.isNotEmpty ? _mergeEventTags(event) : event.tags,
+      // ignore: deprecated_member_use_from_same_package
       extra: extra.isNotEmpty ? _mergeEventExtra(event) : event.extra,
     );
 
@@ -319,17 +310,22 @@ class Scope {
       }
     });
 
-    final span = _span;
-    if (event.contexts.trace == null && span != null) {
-      event.contexts.trace = span.context.toTraceContext(
-        sampled: span.sampled,
+    final newSpan = span;
+    if (event.contexts.trace == null && newSpan != null) {
+      event.contexts.trace = newSpan.context.toTraceContext(
+        sampled: newSpan.samplingDecision?.sampled,
       );
     }
 
     SentryEvent? processedEvent = event;
     for (final processor in _eventProcessors) {
       try {
-        processedEvent = await processor.apply(processedEvent!, hint: hint);
+        final e = processor.apply(processedEvent!, hint: hint);
+        if (e is Future<SentryEvent?>) {
+          processedEvent = await e;
+        } else {
+          processedEvent = e;
+        }
       } catch (exception, stackTrace) {
         _options.logger(
           SentryLevel.error,
@@ -337,6 +333,9 @@ class Scope {
           exception: exception,
           stackTrace: stackTrace,
         );
+        if (_options.devMode) {
+          rethrow;
+        }
       }
       if (processedEvent == null) {
         _options.logger(SentryLevel.debug, 'Event was dropped by a processor');
@@ -364,6 +363,7 @@ class Scope {
   /// the event extra will be kept.
   Map<String, dynamic> _mergeEventExtra(SentryEvent event) =>
       extra.map((key, value) => MapEntry(key, value))
+        // ignore: deprecated_member_use_from_same_package
         ..addAll(event.extra ?? {});
 
   /// If scope and event have a user, the user of the event takes
@@ -381,24 +381,26 @@ class Scope {
       email: eventUser?.email,
       ipAddress: eventUser?.ipAddress,
       username: eventUser?.username,
-      extras: _mergeUserExtra(eventUser?.extras, scopeUser.extras),
+      data: _mergeUserData(eventUser?.data, scopeUser.data),
+      // ignore: deprecated_member_use_from_same_package
+      extras: _mergeUserData(eventUser?.extras, scopeUser.extras),
     );
   }
 
   /// If the User on the scope and the user of an event have extra entries with
   /// the same key, the event user extra will be kept.
-  Map<String, dynamic> _mergeUserExtra(
-    Map<String, dynamic>? eventExtra,
-    Map<String, dynamic>? scopeExtra,
+  Map<String, dynamic> _mergeUserData(
+    Map<String, dynamic>? eventData,
+    Map<String, dynamic>? scopeData,
   ) {
     final map = <String, dynamic>{};
-    if (eventExtra != null) {
-      map.addAll(eventExtra);
+    if (eventData != null) {
+      map.addAll(eventData);
     }
-    if (scopeExtra == null) {
+    if (scopeData == null) {
       return map;
     }
-    for (var value in scopeExtra.entries) {
+    for (var value in scopeData.entries) {
       map.putIfAbsent(value.key, () => value.value);
     }
     return map;
@@ -410,9 +412,9 @@ class Scope {
       ..level = level
       ..fingerprint = List.from(fingerprint)
       .._transaction = _transaction
-      .._span = _span;
+      ..span = span;
 
-    _setUserSync(user);
+    clone._setUserSync(user);
 
     final tags = List.from(_tags.keys);
     for (final tag in tags) {
@@ -447,8 +449,7 @@ class Scope {
     return clone;
   }
 
-  Future<void> _callScopeObservers(
-      Future<void> Function(ScopeObserver) action) async {
+  Future<void> _callScopeObservers(_OnScopeObserver action) async {
     if (_options.enableScopeSync) {
       for (final scopeObserver in _options.scopeObservers) {
         await action(scopeObserver);

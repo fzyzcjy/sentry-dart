@@ -12,11 +12,15 @@ class SentryStackTraceFactory {
   final _absRegex = RegExp(r'^\s*#[0-9]+ +abs +([A-Fa-f0-9]+)');
   final _frameRegex = RegExp(r'^\s*#', multiLine: true);
 
+  static final SentryStackFrame _asynchronousGapFrameJson =
+      SentryStackFrame(absPath: '<asynchronous suspension>');
+
   static const _sentryPackagesIdentifier = <String>[
     'sentry',
     'sentry_flutter',
     'sentry_logging',
     'sentry_dio',
+    'sentry_file',
   ];
 
   SentryStackTraceFactory(this._options);
@@ -25,6 +29,8 @@ class SentryStackTraceFactory {
   List<SentryStackFrame> getStackFrames(dynamic stackTrace) {
     final chain = _parseStackTrace(stackTrace);
     final frames = <SentryStackFrame>[];
+    var onlyAsyncGap = true;
+
     for (var t = 0; t < chain.traces.length; t += 1) {
       final trace = chain.traces[t];
 
@@ -38,16 +44,17 @@ class SentryStackTraceFactory {
         final stackTraceFrame = encodeStackTraceFrame(frame);
         if (stackTraceFrame != null) {
           frames.add(stackTraceFrame);
+          onlyAsyncGap = false;
         }
       }
 
       // fill asynchronous gap
       if (t < chain.traces.length - 1) {
-        frames.add(SentryStackFrame.asynchronousGapFrameJson);
+        frames.add(_asynchronousGapFrameJson);
       }
     }
 
-    return frames.reversed.toList();
+    return onlyAsyncGap ? [] : frames.reversed.toList();
   }
 
   Chain _parseStackTrace(dynamic stackTrace) {

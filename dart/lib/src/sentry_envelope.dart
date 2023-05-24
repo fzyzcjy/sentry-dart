@@ -3,6 +3,7 @@ import 'client_reports/client_report.dart';
 import 'protocol.dart';
 import 'sentry_item_type.dart';
 import 'sentry_options.dart';
+import 'sentry_trace_context_header.dart';
 import 'utils.dart';
 import 'sentry_attachment/sentry_attachment.dart';
 import 'sentry_envelope_header.dart';
@@ -23,10 +24,17 @@ class SentryEnvelope {
   factory SentryEnvelope.fromEvent(
     SentryEvent event,
     SdkVersion sdkVersion, {
+    String? dsn,
+    SentryTraceContextHeader? traceContext,
     List<SentryAttachment>? attachments,
   }) {
     return SentryEnvelope(
-      SentryEnvelopeHeader(event.eventId, sdkVersion),
+      SentryEnvelopeHeader(
+        event.eventId,
+        sdkVersion,
+        dsn: dsn,
+        traceContext: traceContext,
+      ),
       [
         SentryEnvelopeItem.fromEvent(event),
         if (attachments != null)
@@ -37,10 +45,16 @@ class SentryEnvelope {
 
   factory SentryEnvelope.fromUserFeedback(
     SentryUserFeedback feedback,
-    SdkVersion sdkVersion,
-  ) {
+    SdkVersion sdkVersion, {
+    String? dsn,
+  }) {
     return SentryEnvelope(
-      SentryEnvelopeHeader(feedback.eventId, sdkVersion),
+      // no need for [traceContext]
+      SentryEnvelopeHeader(
+        feedback.eventId,
+        sdkVersion,
+        dsn: dsn,
+      ),
       [SentryEnvelopeItem.fromUserFeedback(feedback)],
     );
   }
@@ -49,10 +63,17 @@ class SentryEnvelope {
   factory SentryEnvelope.fromTransaction(
     SentryTransaction transaction,
     SdkVersion sdkVersion, {
+    String? dsn,
+    SentryTraceContextHeader? traceContext,
     List<SentryAttachment>? attachments,
   }) {
     return SentryEnvelope(
-      SentryEnvelopeHeader(transaction.eventId, sdkVersion),
+      SentryEnvelopeHeader(
+        transaction.eventId,
+        sdkVersion,
+        dsn: dsn,
+        traceContext: traceContext,
+      ),
       [
         SentryEnvelopeItem.fromTransaction(transaction),
         if (attachments != null)

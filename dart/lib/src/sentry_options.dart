@@ -40,6 +40,8 @@ class SentryOptions {
 
   /// If [clock] is provided, it is used to get time instead of the system
   /// clock. This is useful in tests. Should be an implementation of [ClockProvider].
+  /// The ClockProvider is expected to return UTC time.
+  @internal
   ClockProvider clock = getUtcDateTime;
 
   int _maxBreadcrumbs = 100;
@@ -69,23 +71,26 @@ class SentryOptions {
   }
 
   /// Maximum number of spans that can be attached to single transaction.
-  ///
-  /// The is an experimental feature. Use at your own risk.
   int _maxSpans = 1000;
 
   /// Returns the maximum number of spans that can be attached to single transaction.
-  ///
-  /// The is an experimental feature. Use at your own risk.
   int get maxSpans => _maxSpans;
 
   /// Sets the maximum number of spans that can be attached to single transaction.
-  ///
-  /// The is an experimental feature. Use at your own risk.
   set maxSpans(int maxSpans) {
     assert(maxSpans > 0);
     _maxSpans = maxSpans;
   }
 
+  /// Configures up to which size request bodies should be included in events.
+  /// This does not change whether an event is captured.
+  MaxRequestBodySize maxRequestBodySize = MaxRequestBodySize.never;
+
+  /// Configures up to which size response bodies should be included in events.
+  /// This does not change whether an event is captured.
+  MaxResponseBodySize maxResponseBodySize = MaxResponseBodySize.never;
+
+  // ignore: deprecated_member_use_from_same_package
   SentryLogger _logger = noOpLogger;
 
   /// Logger interface to log useful debugging information if debug is enabled
@@ -116,10 +121,12 @@ class SentryOptions {
 
   set debug(bool newValue) {
     _debug = newValue;
+    // ignore: deprecated_member_use_from_same_package
     if (_debug == true && logger == noOpLogger) {
-      _logger = dartLogger;
+      _logger = _debugLogger;
     }
-    if (_debug == false && logger == dartLogger) {
+    if (_debug == false && logger == _debugLogger) {
+      // ignore: deprecated_member_use_from_same_package
       _logger = noOpLogger;
     }
   }
@@ -131,11 +138,15 @@ class SentryOptions {
 
   /// Sentry client name used for the HTTP authHeader and userAgent eg
   /// sentry.{language}.{platform}/{version} eg sentry.java.android/2.0.0 would be a valid case
-  String? sentryClientName;
+  String get sentryClientName => '${sdk.name}/${sdk.version}';
 
   /// This function is called with an SDK specific event object and can return a modified event
   /// object or nothing to skip reporting the event
   BeforeSendCallback? beforeSend;
+
+  /// This function is called with an SDK specific transaction object and can return a modified
+  /// transaction object or nothing to skip reporting the transaction
+  BeforeSendTransactionCallback? beforeSendTransaction;
 
   /// This function is called with an SDK specific breadcrumb object before the breadcrumb is added
   /// to the scope. When nothing is returned from the function, the breadcrumb is dropped
@@ -233,6 +244,18 @@ class SentryOptions {
   /// Whether to send personal identifiable information along with events
   bool sendDefaultPii = false;
 
+  /// Configures whether to record exceptions for failed requests.
+  /// Examples for captures exceptions are:
+  /// - In an browser environment this can be requests which fail because of CORS.
+  /// - In an mobile or desktop application this can be requests which failed
+  ///   because the connection was interrupted.
+  /// Use with [SentryHttpClient] or [Dio] integration for this to work
+  bool captureFailedRequests = true;
+
+  /// Whether to records requests as breadcrumbs. This is on by default.
+  /// It only has an effect when the SentryHttpClient or dio integration is in use
+  bool recordHttpBreadcrumbs = true;
+
   /// Whether [SentryEvent] deduplication is enabled.
   /// Can be further configured with [maxDeduplicationItems].
   /// Shoud be set to true if
@@ -287,11 +310,62 @@ class SentryOptions {
   @internal
   late ClientReportRecorder recorder = NoOpClientReportRecorder();
 
+  /// List of strings/regex controlling to which outgoing requests
+  /// the SDK will attach tracing headers.
+  ///
+  /// By default the SDK will attach those headers to all outgoing
+  /// requests. If this option is provided, the SDK will match the
+  /// request URL of outgoing requests against the items in this
+  /// array, and only attach tracing headers if a match was found.
+  final List<String> tracePropagationTargets = ['.*'];
+
+  /// The idle time to wait until the transaction will be finished.
+  /// The transaction will use the end timestamp of the last finished span as
+  /// the endtime for the transaction.
+  ///
+  /// When set to null the transaction must be finished manually.
+  ///
+  /// The default is 3 seconds.
+  Duration? idleTimeout = Duration(seconds: 3);
+
+  final _causeExtractorsByType = <Type, ExceptionCauseExtractor>{};
+
+  final _stackTraceExtractorsByType = <Type, ExceptionStackTraceExtractor>{};
+
+  /// Returns a previously added [ExceptionCauseExtractor] by type
+  ExceptionCauseExtractor? exceptionCauseExtractor(Type type) {
+    return _causeExtractorsByType[type];
+  }
+
+  /// Adds [ExceptionCauseExtractor] in order to extract inner exceptions
+  void addExceptionCauseExtractor(ExceptionCauseExtractor extractor) {
+    _causeExtractorsByType[extractor.exceptionType] = extractor;
+  }
+
+  /// Returns a previously added [ExceptionStackTraceExtractor] by type
+  ExceptionStackTraceExtractor? exceptionStackTraceExtractor(Type type) {
+    return _stackTraceExtractorsByType[type];
+  }
+
+  /// Adds [ExceptionStackTraceExtractor] in order to extract inner exceptions
+  void addExceptionStackTraceExtractor(ExceptionStackTraceExtractor extractor) {
+    _stackTraceExtractorsByType[extractor.exceptionType] = extractor;
+  }
+
+  /// Enables generation of transactions and propagation of trace data. If set
+  /// to null, tracing might be enabled if [tracesSampleRate] or [tracesSampler]
+  /// are set.
+  bool? enableTracing;
+
+  /// Changed SDK behaviour when set to true:
+  /// - Rethrow exceptions that occur in user provided closures
+  @internal
+  bool devMode = false;
+
   SentryOptions({this.dsn, PlatformChecker? checker}) {
     if (checker != null) {
       platformChecker = checker;
     }
-
     sdk = SdkVersion(name: sdkName(platformChecker.isWeb), version: sdkVersion);
     sdk.addPackage('pub:sentry', sdkVersion);
   }
@@ -339,6 +413,10 @@ class SentryOptions {
   /// Returns if tracing should be enabled. If tracing is disabled, starting transactions returns
   /// [NoOpSentrySpan].
   bool isTracingEnabled() {
+    final enable = enableTracing;
+    if (enable != null) {
+      return enable;
+    }
     return tracesSampleRate != null || tracesSampler != null;
   }
 
@@ -348,20 +426,43 @@ class SentryOptions {
   @internal
   late SentryStackTraceFactory stackTraceFactory =
       SentryStackTraceFactory(this);
+
+  void _debugLogger(
+    SentryLevel level,
+    String message, {
+    String? logger,
+    Object? exception,
+    StackTrace? stackTrace,
+  }) {
+    log(
+      '[${level.name}] $message',
+      level: level.toDartLogLevel(),
+      name: logger ?? 'sentry',
+      time: clock(),
+      error: exception,
+      stackTrace: stackTrace,
+    );
+  }
 }
 
 /// This function is called with an SDK specific event object and can return a modified event
 /// object or nothing to skip reporting the event
 typedef BeforeSendCallback = FutureOr<SentryEvent?> Function(
   SentryEvent event, {
-  dynamic hint,
+  Hint? hint,
 });
+
+/// This function is called with an SDK specific transaction object and can return a modified transaction
+/// object or nothing to skip reporting the transaction
+typedef BeforeSendTransactionCallback = FutureOr<SentryTransaction?> Function(
+  SentryTransaction transaction,
+);
 
 /// This function is called with an SDK specific breadcrumb object before the breadcrumb is added
 /// to the scope. When nothing is returned from the function, the breadcrumb is dropped
 typedef BeforeBreadcrumbCallback = Breadcrumb? Function(
   Breadcrumb? breadcrumb, {
-  dynamic hint,
+  Hint? hint,
 });
 
 /// Used to provide timestamp for logging.
@@ -382,6 +483,7 @@ typedef TracesSamplerCallback = double? Function(
 typedef BeforeCaptureWithScopeCallback = void Function(Scope, SentryEvent?);
 
 /// A NoOp logger that does nothing
+@Deprecated('Will be removed in v8. Disable [debug] instead')
 void noOpLogger(
   SentryLevel level,
   String message, {
@@ -391,6 +493,7 @@ void noOpLogger(
 }) {}
 
 /// A Logger that prints out the level and message
+@Deprecated('Will be removed in v8. Enable [debug] instead')
 void dartLogger(
   SentryLevel level,
   String message, {

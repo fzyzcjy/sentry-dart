@@ -5,7 +5,7 @@ import 'package:http/http.dart';
 import 'package:sentry/sentry.dart';
 
 const _exampleDsn =
-    'https://9934c532bf8446ef961450973c898537@o447951.ingest.sentry.io/5428562';
+    'https://e85b375ffb9f43cf8bdf9787768149e0@o447951.ingest.sentry.io/5428562';
 
 const _org = 'sentry-sdks';
 const _projectSlug = 'sentry-flutter';
@@ -18,9 +18,16 @@ void main(List<String> arguments) async {
     print('AUTH TOKEN is not set');
     exit(1);
   }
-  await Sentry.init((options) {
-    options.dsn = _exampleDsn;
-  });
+  final options = SentryOptions(dsn: _exampleDsn)
+    // ignore: invalid_use_of_internal_member
+    ..devMode = true;
+  await Sentry.init(
+    (options) {
+      options.dsn = _exampleDsn;
+    },
+    // ignore: invalid_use_of_internal_member
+    options: options,
+  );
 
   var id = SentryId.empty();
   try {

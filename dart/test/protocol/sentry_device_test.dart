@@ -102,6 +102,52 @@ void main() {
         true,
       );
     });
+
+    test('fromJson double screen_height_pixels and screen_width_pixels', () {
+      sentryDeviceJson['screen_height_pixels'] = 100.0;
+      sentryDeviceJson['screen_width_pixels'] = 100.0;
+
+      final sentryDevice = SentryDevice.fromJson(sentryDeviceJson);
+      final json = sentryDevice.toJson();
+
+      expect(
+        MapEquality().equals(sentryDeviceJson, json),
+        true,
+      );
+    });
+
+    test('batery level converts int to double', () {
+      final map = {'battery_level': 1};
+
+      final sentryDevice = SentryDevice.fromJson(map);
+
+      expect(
+        sentryDevice.batteryLevel,
+        1.0,
+      );
+    });
+
+    test('batery level maps double', () {
+      final map = {'battery_level': 1.0};
+
+      final sentryDevice = SentryDevice.fromJson(map);
+
+      expect(
+        sentryDevice.batteryLevel,
+        1.0,
+      );
+    });
+
+    test('batery level ignores if not a num', () {
+      final map = {'battery_level': 'abc'};
+
+      final sentryDevice = SentryDevice.fromJson(map);
+
+      expect(
+        sentryDevice.batteryLevel,
+        null,
+      );
+    });
   });
 
   group('copyWith', () {

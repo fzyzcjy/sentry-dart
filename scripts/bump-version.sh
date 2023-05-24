@@ -10,11 +10,11 @@ NEW_VERSION="${2}"
 echo "Current version: ${OLD_VERSION}"
 echo "Bumping version: ${NEW_VERSION}"
 
-for pkg in {dart,flutter,logging,dio}; do
+for pkg in {dart,flutter,logging,dio,file,sqflite}; do
   # Bump version in pubspec.yaml
   perl -pi -e "s/^version: .*/version: $NEW_VERSION/" $pkg/pubspec.yaml
   # Bump sentry dependency version in pubspec.yaml
-  perl -pi -e "s/sentry: \^.*/sentry: \^$NEW_VERSION/" $pkg/pubspec.yaml
+  perl -pi -e "s/sentry: .*/sentry: $NEW_VERSION/" $pkg/pubspec.yaml
 done
 
 # Bump version in version.dart

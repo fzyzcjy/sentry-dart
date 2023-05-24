@@ -2,8 +2,6 @@
 // The lint above is okay, because we're using another Sentry package
 
 import 'package:dio/dio.dart';
-import 'package:http/http.dart';
-import 'package:mockito/mockito.dart';
 import 'package:sentry/sentry.dart';
 import 'package:sentry/src/sentry_tracer.dart';
 import 'package:sentry_dio/src/tracing_client_adapter.dart';
@@ -13,8 +11,8 @@ import 'mocks.dart';
 import 'mocks/mock_http_client_adapter.dart';
 import 'mocks/mock_transport.dart';
 
-final requestUri = Uri.parse('https://example.com?foo=bar');
-final requestOptions = '?foo=bar';
+final requestUri = Uri.parse('https://example.com?foo=bar#baz');
+final requestOptions = '?foo=bar#baz';
 
 void main() {
   group(TracingClientAdapter, () {
@@ -43,7 +41,11 @@ void main() {
 
       expect(span.status, SpanStatus.ok());
       expect(span.context.operation, 'http.client');
-      expect(span.context.description, 'GET https://example.com?foo=bar');
+      expect(span.context.description, 'GET https://example.com');
+      expect(span.data['http.method'], 'GET');
+      expect(span.data['url'], 'https://example.com');
+      expect(span.data['http.query'], 'foo=bar');
+      expect(span.data['http.fragment'], 'baz');
     });
 
     test('finish span if errored request', () async {
@@ -121,6 +123,19 @@ void main() {
       );
     });
 
+    test('captured span do not add headers if NoOp', () async {
+      final sut = fixture.getSut(
+        client: fixture.getClient(statusCode: 200, reason: 'OK'),
+      );
+      await fixture._hub
+          .configureScope((scope) => scope.span = NoOpSentrySpan());
+
+      final response = await sut.get<dynamic>(requestOptions);
+
+      expect(response.headers['baggage'], null);
+      expect(response.headers['sentry-trace'], null);
+    });
+
     test('do not throw if no span bound to the scope', () async {
       final sut = fixture.getSut(
         client: fixture.getClient(statusCode: 200, reason: 'OK'),
@@ -139,8 +154,6 @@ MockHttpClientAdapter createThrowingClient() {
     },
   );
 }
-
-class CloseableMockClient extends Mock implements BaseClient {}
 
 class Fixture {
   final _options = SentryOptions(dsn: fakeDsn);

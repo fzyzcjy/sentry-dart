@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:sentry/sentry.dart';
 import 'package:sentry/src/transport/rate_limiter.dart';
 
@@ -24,6 +22,7 @@ final fakeEvent = SentryEvent(
   transaction: '/example/app',
   level: SentryLevel.warning,
   tags: const <String, String>{'project-id': '7371'},
+  // ignore: deprecated_member_use_from_same_package
   extra: const <String, String>{'company-name': 'Dart Inc'},
   fingerprint: const <String>['example-dart'],
   modules: const {'module1': 'factory'},
@@ -33,7 +32,7 @@ final fakeEvent = SentryEvent(
     username: 'first-user',
     email: 'first@user.lan',
     ipAddress: '127.0.0.1',
-    extras: <String, String>{'first-sign-in': '2020-01-01'},
+    data: <String, String>{'first-sign-in': '2020-01-01'},
   ),
   breadcrumbs: [
     Breadcrumb(
@@ -78,7 +77,6 @@ final fakeEvent = SentryEvent(
       orientation: SentryOrientation.landscape,
       manufacturer: 'samsung',
       brand: 'samsung',
-      screenResolution: '2560x1600',
       screenDensity: 2.1,
       screenDpi: 320,
       online: true,
@@ -93,43 +91,37 @@ final fakeEvent = SentryEvent(
       externalStorageSize: 8589934592,
       externalFreeStorage: 2863311530,
       bootTime: DateTime.now().toUtc(),
-      timezone: 'America/Toronto',
     ),
   ),
 );
 
-/// Doesn't do anything with the events
-class NoOpEventProcessor extends EventProcessor {
-  @override
-  FutureOr<SentryEvent?> apply(SentryEvent event, {hint}) {
-    return event;
-  }
-}
-
 /// Always returns null and thus drops all events
-class DropAllEventProcessor extends EventProcessor {
+class DropAllEventProcessor implements EventProcessor {
   @override
-  FutureOr<SentryEvent?> apply(SentryEvent event, {hint}) {
+  SentryEvent? apply(SentryEvent event, {hint}) {
     return null;
   }
 }
 
-class FunctionEventProcessor extends EventProcessor {
+class FunctionEventProcessor implements EventProcessor {
   FunctionEventProcessor(this.applyFunction);
 
   final EventProcessorFunction applyFunction;
 
   @override
-  FutureOr<SentryEvent?> apply(SentryEvent event, {hint}) {
+  SentryEvent? apply(SentryEvent event, {hint}) {
     return applyFunction(event, hint: hint);
   }
 }
 
-typedef EventProcessorFunction = FutureOr<SentryEvent?>
-    Function(SentryEvent event, {dynamic hint});
+typedef EventProcessorFunction = SentryEvent? Function(SentryEvent event,
+    {Hint? hint});
 
 var fakeEnvelope = SentryEnvelope.fromEvent(
-    fakeEvent, SdkVersion(name: 'sdk1', version: '1.0.0'));
+  fakeEvent,
+  SdkVersion(name: 'sdk1', version: '1.0.0'),
+  dsn: fakeDsn,
+);
 
 class MockRateLimiter implements RateLimiter {
   bool filterReturnsNull = false;

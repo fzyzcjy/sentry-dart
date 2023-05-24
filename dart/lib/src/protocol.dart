@@ -23,6 +23,7 @@ export 'protocol/sentry_runtime.dart';
 export 'protocol/sentry_stack_frame.dart';
 export 'protocol/sentry_stack_trace.dart';
 export 'protocol/sentry_user.dart';
+export 'protocol/sentry_geo.dart';
 export 'protocol/max_body_size.dart';
 export 'protocol/sentry_culture.dart';
 export 'protocol/sentry_thread.dart';
@@ -34,3 +35,9 @@ export 'protocol/sentry_transaction.dart';
 export 'protocol/sentry_trace_context.dart';
 export 'protocol/sentry_span.dart';
 export 'protocol/sentry_trace_header.dart';
+export 'protocol/sentry_transaction_name_source.dart';
+export 'protocol/sentry_baggage_header.dart';
+export 'protocol/sentry_transaction_info.dart';
+// view hierarchy
+export 'protocol/sentry_view_hierarchy.dart';
+export 'protocol/sentry_view_hierarchy_element.dart';

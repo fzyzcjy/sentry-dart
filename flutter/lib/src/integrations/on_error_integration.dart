@@ -1,21 +1,20 @@
-import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/widgets.dart';
 import 'package:sentry/sentry.dart';
-import '../binding_utils.dart';
 import '../sentry_flutter_options.dart';
 
 typedef ErrorCallback = bool Function(Object exception, StackTrace stackTrace);
 
 /// Integration which captures `PlatformDispatcher.onError`
 /// See:
-/// - https://master-api.flutter.dev/flutter/dart-ui/PlatformDispatcher/onError.html
+/// - https://api.flutter.dev/flutter/dart-ui/PlatformDispatcher/onError.html
 ///
 /// Remarks:
 /// - Only usable on Flutter >= 3.3.0.
+/// - Does not work on Flutter Web
 ///
-/// This can be used instead of the [RunZonedGuardedIntegration]. Removing the
+/// This is used instead of [RunZonedGuardedIntegration]. Not using the
 /// [RunZonedGuardedIntegration] results in a minimal improved startup time,
 /// since creating [Zone]s is not cheap.
 class OnErrorIntegration implements Integration<SentryFlutterOptions> {
@@ -29,7 +28,7 @@ class OnErrorIntegration implements Integration<SentryFlutterOptions> {
   @override
   void call(Hub hub, SentryFlutterOptions options) {
     _options = options;
-    final binding = BindingUtils.getWidgetsBindingInstance();
+    final binding = options.bindingUtils.instance;
 
     if (binding == null) {
       return;
@@ -39,12 +38,17 @@ class OnErrorIntegration implements Integration<SentryFlutterOptions> {
     final wrapper = dispatchWrapper ??
         PlatformDispatcherWrapper(binding.platformDispatcher);
 
-    if (!wrapper.isOnErrorSupported(options)) {
-      return;
-    }
     _defaultOnError = wrapper.onError;
 
     _integrationOnError = (Object exception, StackTrace stackTrace) {
+      _options!.logger(
+        SentryLevel.error,
+        "Uncaught Platform Error",
+        logger: 'sentry.platformError',
+        exception: exception,
+        stackTrace: stackTrace,
+      );
+
       final handled = _defaultOnError?.call(exception, stackTrace) ?? true;
 
       // As per docs, the app might crash on some platforms
@@ -60,6 +64,14 @@ class OnErrorIntegration implements Integration<SentryFlutterOptions> {
       var event = SentryEvent(
         throwable: throwableMechanism,
         level: SentryLevel.fatal,
+        // ignore: invalid_use_of_internal_member
+        timestamp: options.clock(),
+      );
+
+      // marks the span status if none to `internal_error` in case there's an
+      // unhandled error
+      hub.configureScope(
+        (scope) => scope.span?.status ??= const SpanStatus.internalError(),
       );
 
       // unawaited future
@@ -75,7 +87,7 @@ class OnErrorIntegration implements Integration<SentryFlutterOptions> {
   }
 
   @override
-  void close() async {
+  void close() {
     if (!(dispatchWrapper?.isOnErrorSupported(_options!) == true)) {
       // bail out
       return;
@@ -98,15 +110,15 @@ class OnErrorIntegration implements Integration<SentryFlutterOptions> {
 class PlatformDispatcherWrapper {
   PlatformDispatcherWrapper(this._dispatcher);
 
-  final PlatformDispatcher _dispatcher;
+  final PlatformDispatcher? _dispatcher;
 
   /// Should not be accessed if [isOnErrorSupported] == false
   ErrorCallback? get onError =>
-      (_dispatcher as dynamic).onError as ErrorCallback?;
+      (_dispatcher as dynamic)?.onError as ErrorCallback?;
 
   /// Should not be accessed if [isOnErrorSupported] == false
   set onError(ErrorCallback? callback) {
-    (_dispatcher as dynamic).onError = callback;
+    (_dispatcher as dynamic)?.onError = callback;
   }
 
   bool isOnErrorSupported(SentryFlutterOptions options) {

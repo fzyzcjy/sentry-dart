@@ -1,6 +1,5 @@
 import 'package:http/http.dart';
 import 'package:http/testing.dart';
-import 'package:mockito/mockito.dart';
 import 'package:sentry/sentry.dart';
 import 'package:sentry/src/http_client/tracing_client.dart';
 import 'package:sentry/src/sentry_tracer.dart';
@@ -9,7 +8,7 @@ import 'package:test/test.dart';
 import '../mocks.dart';
 import '../mocks/mock_transport.dart';
 
-final requestUri = Uri.parse('https://example.com?foo=bar');
+final requestUri = Uri.parse('https://example.com?foo=bar#baz');
 
 void main() {
   group(TracingClient, () {
@@ -38,7 +37,11 @@ void main() {
 
       expect(span.status, SpanStatus.ok());
       expect(span.context.operation, 'http.client');
-      expect(span.context.description, 'GET https://example.com?foo=bar');
+      expect(span.context.description, 'GET https://example.com');
+      expect(span.data['http.method'], 'GET');
+      expect(span.data['url'], 'https://example.com');
+      expect(span.data['http.query'], 'foo=bar');
+      expect(span.data['http.fragment'], 'baz');
     });
 
     test('finish span if errored request', () async {
@@ -112,6 +115,69 @@ void main() {
           span.toSentryTrace().value);
     });
 
+    test('captured span adds baggage header to the request', () async {
+      final sut = fixture.getSut(
+        client: fixture.getClient(statusCode: 200, reason: 'OK'),
+      );
+      final tr = fixture._hub.startTransaction(
+        'name',
+        'op',
+        bindToScope: true,
+      );
+
+      final response = await sut.get(requestUri);
+
+      await tr.finish();
+
+      final tracer = (tr as SentryTracer);
+      final span = tracer.children.first;
+      final baggage = span.toBaggageHeader();
+      final sentryTrace = span.toSentryTrace();
+
+      expect(response.request!.headers[baggage!.name], baggage.value);
+      expect(response.request!.headers[sentryTrace.name], sentryTrace.value);
+    });
+
+    test('captured span do not add headers if NoOp', () async {
+      final sut = fixture.getSut(
+        client: fixture.getClient(statusCode: 200, reason: 'OK'),
+      );
+
+      await fixture._hub
+          .configureScope((scope) => scope.span = NoOpSentrySpan());
+
+      final response = await sut.get(requestUri);
+
+      expect(response.request!.headers['baggage'], null);
+      expect(response.request!.headers['sentry-trace'], null);
+    });
+
+    test('captured span do not add headers if origins not set', () async {
+      final sut = fixture.getSut(
+        client: fixture.getClient(
+          statusCode: 200,
+          reason: 'OK',
+        ),
+        tracePropagationTargets: ['nope'],
+      );
+      final tr = fixture._hub.startTransaction(
+        'name',
+        'op',
+        bindToScope: true,
+      );
+
+      final response = await sut.get(requestUri);
+
+      await tr.finish();
+
+      final tracer = (tr as SentryTracer);
+      final span = tracer.children.first;
+      final baggage = span.toBaggageHeader();
+
+      expect(response.request!.headers[baggage!.name], isNull);
+      expect(response.request!.headers[span.toSentryTrace().name], isNull);
+    });
+
     test('do not throw if no span bound to the scope', () async {
       final sut = fixture.getSut(
         client: fixture.getClient(statusCode: 200, reason: 'OK'),
@@ -131,8 +197,6 @@ MockClient createThrowingClient() {
   );
 }
 
-class CloseableMockClient extends Mock implements BaseClient {}
-
 class Fixture {
   final _options = SentryOptions(dsn: fakeDsn);
   late Hub _hub;
@@ -143,7 +207,14 @@ class Fixture {
     _hub = Hub(_options);
   }
 
-  TracingClient getSut({MockClient? client}) {
+  TracingClient getSut({
+    MockClient? client,
+    List<String>? tracePropagationTargets,
+  }) {
+    if (tracePropagationTargets != null) {
+      _hub.options.tracePropagationTargets.clear();
+      _hub.options.tracePropagationTargets.addAll(tracePropagationTargets);
+    }
     final mc = client ?? getClient();
     return TracingClient(
       client: mc,

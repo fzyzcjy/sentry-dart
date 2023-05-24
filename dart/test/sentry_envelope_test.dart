@@ -9,6 +9,7 @@ import 'package:sentry/src/sentry_tracer.dart';
 import 'package:sentry/src/utils.dart';
 import 'package:test/test.dart';
 
+import 'mocks.dart';
 import 'mocks/mock_hub.dart';
 
 void main() {
@@ -27,7 +28,15 @@ void main() {
 
       final item = SentryEnvelopeItem(itemHeader, dataFactory);
 
-      final header = SentryEnvelopeHeader(eventId, null);
+      final context = SentryTraceContextHeader.fromJson(<String, dynamic>{
+        'trace_id': '${SentryId.newId()}',
+        'public_key': '123',
+      });
+      final header = SentryEnvelopeHeader(
+        eventId,
+        null,
+        traceContext: context,
+      );
       final sut = SentryEnvelope(header, [item, item]);
 
       final expectedHeaderJson = header.toJson();
@@ -52,12 +61,23 @@ void main() {
       final sentryEvent = SentryEvent(eventId: eventId);
       final sdkVersion =
           SdkVersion(name: 'fixture-name', version: 'fixture-version');
-      final sut = SentryEnvelope.fromEvent(sentryEvent, sdkVersion);
+      final context = SentryTraceContextHeader.fromJson(<String, dynamic>{
+        'trace_id': '${SentryId.newId()}',
+        'public_key': '123',
+      });
+      final sut = SentryEnvelope.fromEvent(
+        sentryEvent,
+        sdkVersion,
+        dsn: fakeDsn,
+        traceContext: context,
+      );
 
       final expectedEnvelopeItem = SentryEnvelopeItem.fromEvent(sentryEvent);
 
       expect(sut.header.eventId, eventId);
       expect(sut.header.sdkVersion, sdkVersion);
+      expect(sut.header.traceContext, context);
+      expect(sut.header.dsn, fakeDsn);
       expect(sut.items[0].header.contentType,
           expectedEnvelopeItem.header.contentType);
       expect(sut.items[0].header.type, expectedEnvelopeItem.header.type);
@@ -81,12 +101,23 @@ void main() {
 
       final sdkVersion =
           SdkVersion(name: 'fixture-name', version: 'fixture-version');
-      final sut = SentryEnvelope.fromTransaction(tr, sdkVersion);
+      final traceContext = SentryTraceContextHeader.fromJson(<String, dynamic>{
+        'trace_id': '${SentryId.newId()}',
+        'public_key': '123',
+      });
+      final sut = SentryEnvelope.fromTransaction(
+        tr,
+        sdkVersion,
+        dsn: fakeDsn,
+        traceContext: traceContext,
+      );
 
       final expectedEnvelopeItem = SentryEnvelopeItem.fromTransaction(tr);
 
       expect(sut.header.eventId, tr.eventId);
       expect(sut.header.sdkVersion, sdkVersion);
+      expect(sut.header.traceContext, traceContext);
+      expect(sut.header.dsn, fakeDsn);
       expect(sut.items[0].header.contentType,
           expectedEnvelopeItem.header.contentType);
       expect(sut.items[0].header.type, expectedEnvelopeItem.header.type);
@@ -114,12 +145,14 @@ void main() {
       final sut = SentryEnvelope.fromEvent(
         sentryEvent,
         sdkVersion,
+        dsn: fakeDsn,
         attachments: [attachment],
       );
 
       final expectedEnvelopeItem = SentryEnvelope.fromEvent(
         sentryEvent,
         sdkVersion,
+        dsn: fakeDsn,
       );
 
       final sutEnvelopeData = <int>[];
@@ -138,6 +171,7 @@ void main() {
     // This test passes if no exceptions are thrown, thus no asserts.
     // This is a test for https://github.com/getsentry/sentry-dart/issues/523
     test('serialize with non-serializable class', () async {
+      // ignore: deprecated_member_use_from_same_package
       final event = SentryEvent(extra: {'non-ecodable': NonEncodable()});
       final sut = SentryEnvelope.fromEvent(
         event,
@@ -145,6 +179,7 @@ void main() {
           name: 'test',
           version: '1',
         ),
+        dsn: fakeDsn,
       );
 
       final _ = sut.envelopeStream(SentryOptions()).map((e) => e);
@@ -152,6 +187,4 @@ void main() {
   });
 }
 
-class NonEncodable {
-  final String message = 'Hello World';
-}
+class NonEncodable {}

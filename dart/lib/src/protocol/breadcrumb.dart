@@ -3,7 +3,7 @@ import 'package:meta/meta.dart';
 import '../utils.dart';
 import '../protocol.dart';
 
-/// Structed data to describe more information pior to the event captured.
+/// Structured data to describe more information prior to the event captured.
 /// See `Sentry.captureEvent()`.
 ///
 /// The outgoing JSON representation is:
@@ -47,6 +47,8 @@ class Breadcrumb {
 
     // Size of the response body in bytes
     int? responseBodySize,
+    String? httpQuery,
+    String? httpFragment,
   }) {
     return Breadcrumb(
       type: 'http',
@@ -61,6 +63,8 @@ class Breadcrumb {
         if (requestDuration != null) 'duration': requestDuration.toString(),
         if (requestBodySize != null) 'request_body_size': requestBodySize,
         if (responseBodySize != null) 'response_body_size': responseBodySize,
+        if (httpQuery != null) 'http.query': httpQuery,
+        if (httpFragment != null) 'http.fragment': httpFragment,
       },
     );
   }
@@ -78,6 +82,33 @@ class Breadcrumb {
       type: 'debug',
       timestamp: timestamp,
       data: data,
+    );
+  }
+
+  factory Breadcrumb.userInteraction({
+    String? message,
+    SentryLevel? level,
+    DateTime? timestamp,
+    Map<String, dynamic>? data,
+    required String subCategory,
+    String? viewId,
+    String? viewClass,
+  }) {
+    final newData = data ?? {};
+    if (viewId != null) {
+      newData['view.id'] = viewId;
+    }
+    if (viewClass != null) {
+      newData['view.class'] = viewClass;
+    }
+
+    return Breadcrumb(
+      message: message,
+      level: level,
+      category: 'ui.$subCategory',
+      type: 'user',
+      timestamp: timestamp,
+      data: newData,
     );
   }
 
@@ -148,27 +179,14 @@ class Breadcrumb {
   /// Converts this breadcrumb to a map that can be serialized to JSON according
   /// to the Sentry protocol.
   Map<String, dynamic> toJson() {
-    final json = <String, dynamic>{
+    return {
       'timestamp': formatDateAsIso8601WithMillisPrecision(timestamp),
+      if (message != null) 'message': message,
+      if (category != null) 'category': category,
+      if (data?.isNotEmpty ?? false) 'data': data,
+      if (level != null) 'level': level!.name,
+      if (type != null) 'type': type,
     };
-
-    if (message != null) {
-      json['message'] = message;
-    }
-    if (category != null) {
-      json['category'] = category;
-    }
-    if (data?.isNotEmpty ?? false) {
-      json['data'] = data;
-    }
-    if (level != null) {
-      json['level'] = level!.name;
-    }
-
-    if (type != null) {
-      json['type'] = type;
-    }
-    return json;
   }
 
   Breadcrumb copyWith({

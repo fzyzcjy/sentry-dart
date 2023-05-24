@@ -15,23 +15,21 @@ import 'mocks.mocks.dart';
 void main() {
   late Fixture fixture;
 
-  PageRoute route(RouteSettings? settings) => PageRouteBuilder<void>(
+  PageRoute<dynamic> route(RouteSettings? settings) => PageRouteBuilder<void>(
         pageBuilder: (_, __, ___) => Container(),
         settings: settings,
       );
 
-  void _whenAnyStart(MockHub mockHub, ISentrySpan thenReturnSpan,
-      {String? name}) {
-    when(mockHub.startTransaction(
-      name ?? any,
+  void _whenAnyStart(MockHub mockHub, ISentrySpan thenReturnSpan) {
+    when(mockHub.startTransactionWithContext(
       any,
-      description: anyNamed('description'),
       bindToScope: anyNamed('bindToScope'),
       waitForChildren: anyNamed('waitForChildren'),
       autoFinishAfter: anyNamed('autoFinishAfter'),
       trimEnd: anyNamed('trimEnd'),
       onFinish: anyNamed('onFinish'),
       customSamplingContext: anyNamed('customSamplingContext'),
+      startTimestamp: anyNamed('startTimestamp'),
     )).thenReturn(thenReturnSpan);
   }
 
@@ -50,7 +48,7 @@ void main() {
       final mockHub = _MockHub();
       final native = SentryNative();
       final mockNativeChannel = MockNativeChannel();
-      native.setNativeChannel(mockNativeChannel);
+      native.nativeChannel = mockNativeChannel;
 
       final tracer = getMockSentryTracer();
       _whenAnyStart(mockHub, tracer);
@@ -77,7 +75,7 @@ void main() {
       mockNativeChannel.nativeFrames = nativeFrames;
 
       final mockNative = SentryNative();
-      mockNative.setNativeChannel(mockNativeChannel);
+      mockNative.nativeChannel = mockNativeChannel;
 
       final sut = fixture.getSut(
         hub: hub,
@@ -94,11 +92,11 @@ void main() {
         actualTransaction = scope.span as SentryTracer;
       });
 
-      await Future.delayed(Duration(milliseconds: 500));
+      await Future<void>.delayed(Duration(milliseconds: 500));
 
       expect(mockNativeChannel.numberOfEndNativeFramesCalls, 1);
 
-      final measurements = actualTransaction?.measurements ?? [];
+      final measurements = actualTransaction?.measurements ?? {};
 
       expect(measurements.length, 3);
 
@@ -106,7 +104,8 @@ void main() {
       final expectedSlow = SentryMeasurement.slowFrames(2);
       final expectedFrozen = SentryMeasurement.frozenFrames(1);
 
-      for (final measurement in measurements) {
+      for (final item in measurements.entries) {
+        final measurement = item.value;
         if (measurement.name == expectedTotal.name) {
           expect(measurement.value, expectedTotal.value);
         } else if (measurement.name == expectedSlow.name) {
@@ -118,13 +117,15 @@ void main() {
     });
   });
 
-  group('RouteObserverTransaction', () {
+  group('$SentryNavigatorObserver', () {
     test('didPush starts transaction', () {
-      final currentRoute = route(RouteSettings(name: 'Current Route'));
+      const name = 'Current Route';
+      final currentRoute = route(RouteSettings(name: name));
 
+      const op = 'navigation';
       final hub = _MockHub();
-      final span = getMockSentryTracer();
-      when(span.context).thenReturn(SentrySpanContext(operation: 'op'));
+      final span = getMockSentryTracer(name: name);
+      when(span.context).thenReturn(SentrySpanContext(operation: op));
       _whenAnyStart(hub, span);
 
       final sut = fixture.getSut(
@@ -134,16 +135,18 @@ void main() {
 
       sut.didPush(currentRoute, null);
 
-      verify(hub.startTransaction(
-        'Current Route',
-        'navigation',
+      final context = verify(hub.startTransactionWithContext(
+        captureAny,
         waitForChildren: true,
-        autoFinishAfter: Duration(seconds: 5),
+        autoFinishAfter: anyNamed('autoFinishAfter'),
         trimEnd: true,
         onFinish: anyNamed('onFinish'),
-      ));
+      )).captured.single as SentryTransactionContext;
+
+      expect(context.name, name);
 
       hub.configureScope((scope) {
+        expect(scope.span?.context.operation, op);
         expect(scope.span, span);
       });
     });
@@ -163,9 +166,8 @@ void main() {
 
       sut.didPush(currentRoute, null);
 
-      verify(hub.startTransaction(
-        'Current Route',
-        'navigation',
+      verify(hub.startTransactionWithContext(
+        any,
         waitForChildren: true,
         autoFinishAfter: Duration(seconds: 5),
         trimEnd: true,
@@ -174,6 +176,7 @@ void main() {
 
       hub.configureScope((scope) {
         expect(scope.span, null);
+        expect(scope.transaction, null);
       });
     });
 
@@ -189,11 +192,10 @@ void main() {
 
       sut.didPush(currentRoute, null);
 
-      verifyNever(hub.startTransaction(
-        'Current Route',
-        'navigation',
+      verifyNever(hub.startTransactionWithContext(
+        any,
         waitForChildren: true,
-        autoFinishAfter: Duration(seconds: 3),
+        autoFinishAfter: anyNamed('autoFinishAfter'),
         trimEnd: true,
         onFinish: anyNamed('onFinish'),
       ));
@@ -215,11 +217,10 @@ void main() {
 
       sut.didPush(currentRoute, null);
 
-      verifyNever(hub.startTransaction(
-        'Current Route',
-        'navigation',
+      verifyNever(hub.startTransactionWithContext(
+        any,
         waitForChildren: true,
-        autoFinishAfter: Duration(seconds: 3),
+        autoFinishAfter: anyNamed('autoFinishAfter'),
         trimEnd: true,
         onFinish: anyNamed('onFinish'),
       ));
@@ -243,11 +244,10 @@ void main() {
 
       sut.didPush(currentRoute, null);
 
-      verify(hub.startTransaction(
-        'Current Route',
-        'navigation',
+      verify(hub.startTransactionWithContext(
+        any,
         waitForChildren: true,
-        autoFinishAfter: Duration(seconds: 3),
+        autoFinishAfter: anyNamed('autoFinishAfter'),
         trimEnd: true,
         onFinish: anyNamed('onFinish'),
       ));
@@ -302,17 +302,17 @@ void main() {
       final previousSpan = getMockSentryTracer();
       when(previousSpan.context).thenReturn(SentrySpanContext(operation: 'op'));
       when(previousSpan.status).thenReturn(null);
-      _whenAnyStart(hub, previousSpan, name: 'Previous Route');
+
+      _whenAnyStart(hub, previousSpan);
 
       final sut = fixture.getSut(hub: hub);
 
       sut.didPop(currentRoute, previousRoute);
 
-      verify(hub.startTransaction(
-        'Previous Route',
-        'navigation',
+      verify(hub.startTransactionWithContext(
+        any,
         waitForChildren: true,
-        autoFinishAfter: Duration(seconds: 3),
+        autoFinishAfter: anyNamed('autoFinishAfter'),
         trimEnd: true,
         onFinish: anyNamed('onFinish'),
       ));
@@ -320,31 +320,6 @@ void main() {
       hub.configureScope((scope) {
         expect(scope.span, previousSpan);
       });
-    });
-
-    test('didPush push multiple finishes previous', () async {
-      final firstRoute = route(RouteSettings(name: 'First Route'));
-      final secondRoute = route(RouteSettings(name: 'Second Route'));
-
-      final hub = _MockHub();
-      final firstSpan = getMockSentryTracer();
-      when(firstSpan.context).thenReturn(SentrySpanContext(operation: 'op'));
-      when(firstSpan.status).thenReturn(null);
-
-      final secondSpan = getMockSentryTracer();
-      when(secondSpan.context).thenReturn(SentrySpanContext(operation: 'op'));
-      when(secondSpan.status).thenReturn(null);
-
-      _whenAnyStart(hub, firstSpan, name: 'First Route');
-      _whenAnyStart(hub, secondSpan, name: 'Second Route');
-
-      final sut = fixture.getSut(hub: hub);
-
-      sut.didPush(firstRoute, null);
-      sut.didPush(secondRoute, firstRoute);
-
-      verify(firstSpan.status = SpanStatus.ok());
-      verify(firstSpan.finish());
     });
 
     test('route arguments are set on transaction', () {
@@ -371,7 +346,7 @@ void main() {
       final rootRoute = route(RouteSettings(name: '/'));
 
       final hub = _MockHub();
-      final span = getMockSentryTracer();
+      final span = getMockSentryTracer(name: '/');
       when(span.context).thenReturn(SentrySpanContext(operation: 'op'));
       _whenAnyStart(hub, span);
 
@@ -379,14 +354,15 @@ void main() {
 
       sut.didPush(rootRoute, null);
 
-      verify(hub.startTransaction(
-        'root ("/")',
-        'navigation',
+      final context = verify(hub.startTransactionWithContext(
+        captureAny,
         waitForChildren: true,
-        autoFinishAfter: Duration(seconds: 3),
+        autoFinishAfter: anyNamed('autoFinishAfter'),
         trimEnd: true,
         onFinish: anyNamed('onFinish'),
-      ));
+      )).captured.single as SentryTransactionContext;
+
+      expect(context.name, 'root ("/")');
 
       hub.configureScope((scope) {
         expect(scope.span, span);
@@ -529,7 +505,7 @@ void main() {
         RouteSettings(name: name, arguments: arguments);
 
     test('Test recording of Breadcrumbs', () {
-      final hub = MockHub();
+      final hub = _MockHub();
       _whenAnyStart(hub, NoOpSentrySpan());
       final observer = fixture.getSut(hub: hub);
 
@@ -551,7 +527,7 @@ void main() {
     });
 
     test('No arguments', () {
-      final hub = MockHub();
+      final hub = _MockHub();
       _whenAnyStart(hub, NoOpSentrySpan());
       final observer = fixture.getSut(hub: hub);
 
@@ -573,7 +549,7 @@ void main() {
     });
 
     test('No arguments & no name', () {
-      final hub = MockHub();
+      final hub = _MockHub();
       _whenAnyStart(hub, NoOpSentrySpan());
       final observer = fixture.getSut(hub: hub);
 
@@ -593,11 +569,11 @@ void main() {
     });
 
     test('No RouteSettings', () {
-      PageRoute route() => PageRouteBuilder<void>(
+      PageRoute<dynamic> route() => PageRouteBuilder<void>(
             pageBuilder: (_, __, ___) => Container(),
           );
 
-      final hub = MockHub();
+      final hub = _MockHub();
       final observer = fixture.getSut(hub: hub);
 
       final to = route();
@@ -673,7 +649,7 @@ void main() {
     });
 
     test('modifying route settings', () {
-      final hub = MockHub();
+      final hub = _MockHub();
       _whenAnyStart(hub, NoOpSentrySpan());
       final observer = fixture.getSut(
           hub: hub,
@@ -702,7 +678,7 @@ void main() {
     });
 
     test('add additional data', () {
-      final hub = MockHub();
+      final hub = _MockHub();
       _whenAnyStart(hub, NoOpSentrySpan());
       final observer = fixture.getSut(
           hub: hub,
@@ -726,6 +702,28 @@ void main() {
           data: {'foo': 'bar'},
         ).data,
       );
+    });
+
+    test('route name as transaction with routeNameExtractor', () {
+      final hub = _MockHub();
+      _whenAnyStart(hub, NoOpSentrySpan());
+      final observer = fixture.getSut(
+          hub: hub,
+          setRouteNameAsTransaction: true,
+          routeNameExtractor: (settings) =>
+              settings?.copyWith(name: '${settings.name}_test'));
+
+      final to = routeSettings('to');
+      final previous = routeSettings('previous');
+
+      observer.didPush(route(to), route(previous));
+      expect(hub.scope.transaction, 'to_test');
+
+      observer.didPop(route(to), route(previous));
+      expect(hub.scope.transaction, 'previous_test');
+
+      observer.didReplace(newRoute: route(to), oldRoute: route(previous));
+      expect(hub.scope.transaction, 'to_test');
     });
   });
 }
@@ -755,15 +753,34 @@ class Fixture {
 }
 
 class _MockHub extends MockHub {
-  final Scope scope = Scope(SentryOptions(dsn: fakeDsn));
+  @override
+  final options = SentryOptions(dsn: fakeDsn);
+
+  late final scope = Scope(options);
+
   @override
   FutureOr<void> configureScope(ScopeCallback? callback) async {
     await callback?.call(scope);
   }
 }
 
-ISentrySpan getMockSentryTracer() {
+ISentrySpan getMockSentryTracer({String? name}) {
   final tracer = MockSentryTracer();
-  when(tracer.name).thenReturn('name');
+  when(tracer.name).thenReturn(name ?? 'name');
   return tracer;
+}
+
+extension RouteSettingsExtensions on RouteSettings {
+  /// Creates a copy of this route settings object with the given fields
+  /// replaced with the new values.
+  /// Flutter 3.6 beta removed copyWith but we use it for testing
+  RouteSettings copyWith({
+    String? name,
+    Object? arguments,
+  }) {
+    return RouteSettings(
+      name: name ?? this.name,
+      arguments: arguments ?? this.arguments,
+    );
+  }
 }

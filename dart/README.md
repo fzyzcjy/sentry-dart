@@ -10,7 +10,7 @@ Sentry SDK for Dart
 
 | package | build | pub | likes | popularity | pub points |
 | ------- | ------- | ------- | ------- | ------- | ------- |
-| sentry | [![build](https://github.com/getsentry/sentry-dart/workflows/sentry-dart/badge.svg?branch=main)](https://github.com/getsentry/sentry-dart/actions?query=workflow%3Asentry-dart) | [![pub package](https://img.shields.io/pub/v/sentry.svg)](https://pub.dev/packages/sentry) | [![likes](https://badges.bar/sentry/likes)](https://pub.dev/packages/sentry/score) | [![popularity](https://badges.bar/sentry/popularity)](https://pub.dev/packages/sentry/score) | [![pub points](https://badges.bar/sentry/pub%20points)](https://pub.dev/packages/sentry/score)
+| sentry | [![build](https://github.com/getsentry/sentry-dart/workflows/sentry-dart/badge.svg?branch=main)](https://github.com/getsentry/sentry-dart/actions?query=workflow%3Asentry-dart) | [![pub package](https://img.shields.io/pub/v/sentry.svg)](https://pub.dev/packages/sentry) | [![likes](https://img.shields.io/pub/likes/sentry)](https://pub.dev/packages/sentry/score) | [![popularity](https://img.shields.io/pub/popularity/sentry)](https://img.shields.io/pub/sentry) | [![pub points](https://img.shields.io/pub/points/sentry)](https://pub.dev/packages/sentry/score)
 
 Pure Dart SDK used by any Dart application like AngularDart, CLI and Server.
 
@@ -21,7 +21,7 @@ That will give you native crash support (for Android and iOS), [release health](
 
 #### Usage
 
-- Sign up for a Sentry.io account and get a DSN at http://sentry.io.
+- Sign up for a Sentry.io account and get a DSN at https://sentry.io.
 
 - Follow the installing instructions on [pub.dev](https://pub.dev/packages/sentry/install).
 
@@ -114,7 +114,7 @@ This is currently an opt-in feature. The following example shows how to enable i
 ```dart
 import 'package:sentry/sentry.dart';
 
-var client = SentryHttpClient(captureFailedRequests: true);
+var client = SentryHttpClient();
 try {
 var uriResponse = await client.post('https://example.com/whatsit/create',
      body: {'name': 'doodle', 'color': 'blue'});
@@ -160,7 +160,7 @@ final transaction = Sentry.startTransaction(
   bindToScope: true,
 );
 
-var client = SentryHttpClient(networkTracing: true);
+var client = SentryHttpClient();
 try {
 var uriResponse = await client.post('https://example.com/whatsit/create',
      body: {'name': 'doodle', 'color': 'blue'});
@@ -180,7 +180,7 @@ Read more about [Automatic Instrumentation](https://docs.sentry.io/platforms/dar
 - Use a `catchError` block for `Futures`, examples on [dart.dev](https://dart.dev/guides/libraries/futures-error-handling).
 - The SDK already runs your `callback` on an error handler, e.g. using [runZonedGuarded](https://api.flutter.dev/flutter/dart-async/runZonedGuarded.html), events caught by the `runZonedGuarded` are captured automatically.
 - [Current Isolate errors](https://api.flutter.dev/flutter/dart-isolate/Isolate/addErrorListener.html) which is the equivalent of a main or UI thread, are captured automatically (Only for non-Web Apps).
-- For your own `Isolates`, add an [Error Listener](https://api.flutter.dev/flutter/dart-isolate/Isolate/addErrorListener.html) and call `Sentry.captureException`.
+- For your own `Isolates`, add an [Error Listener](https://api.flutter.dev/flutter/dart-isolate/Isolate/addErrorListener.html) by calling `isolate.addSentryErrorListener()`.
 
 #### Resources
 

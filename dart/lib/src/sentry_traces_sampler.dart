@@ -6,6 +6,8 @@ import '../sentry.dart';
 
 @internal
 class SentryTracesSampler {
+  static const _defaultSampleRate = 1.0;
+
   final SentryOptions _options;
   final Random _random;
 
@@ -14,31 +16,55 @@ class SentryTracesSampler {
     Random? random,
   }) : _random = random ?? Random();
 
-  bool sample(SentrySamplingContext samplingContext) {
-    final sampled = samplingContext.transactionContext.sampled;
-    if (sampled != null) {
-      return sampled;
+  SentryTracesSamplingDecision sample(SentrySamplingContext samplingContext) {
+    final samplingDecision =
+        samplingContext.transactionContext.samplingDecision;
+    if (samplingDecision != null) {
+      return samplingDecision;
     }
 
     final tracesSampler = _options.tracesSampler;
     if (tracesSampler != null) {
-      final result = tracesSampler(samplingContext);
-      if (result != null) {
-        return _sample(result);
+      try {
+        final result = tracesSampler(samplingContext);
+        if (result != null) {
+          return SentryTracesSamplingDecision(
+            _sample(result),
+            sampleRate: result,
+          );
+        }
+      } catch (exception, stackTrace) {
+        _options.logger(
+          SentryLevel.error,
+          'The tracesSampler callback threw an exception',
+          exception: exception,
+          stackTrace: stackTrace,
+        );
+        if (_options.devMode) {
+          rethrow;
+        }
       }
     }
 
-    final parentSampled = samplingContext.transactionContext.parentSampled;
-    if (parentSampled != null) {
-      return parentSampled;
+    final parentSamplingDecision =
+        samplingContext.transactionContext.parentSamplingDecision;
+    if (parentSamplingDecision != null) {
+      return parentSamplingDecision;
     }
 
-    final tracesSampleRate = _options.tracesSampleRate;
-    if (tracesSampleRate != null) {
-      return _sample(tracesSampleRate);
+    double? optionsRate = _options.tracesSampleRate;
+    double? defaultRate =
+        _options.enableTracing == true ? _defaultSampleRate : null;
+    double? optionsOrDefaultRate = optionsRate ?? defaultRate;
+
+    if (optionsOrDefaultRate != null) {
+      return SentryTracesSamplingDecision(
+        _sample(optionsOrDefaultRate),
+        sampleRate: optionsOrDefaultRate,
+      );
     }
 
-    return false;
+    return SentryTracesSamplingDecision(false);
   }
 
   bool _sample(double result) => !(result < _random.nextDouble());

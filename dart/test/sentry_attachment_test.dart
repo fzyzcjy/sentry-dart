@@ -159,6 +159,25 @@ void main() {
 
       expect(attachment.addToTransactions, true);
     });
+
+    test('fromScreenshotData', () async {
+      final attachment =
+          SentryAttachment.fromScreenshotData(Uint8List.fromList([0, 0, 0, 0]));
+      expect(attachment.attachmentType, SentryAttachment.typeAttachmentDefault);
+      expect(attachment.contentType, 'image/png');
+      expect(attachment.filename, 'screenshot.png');
+      expect(attachment.addToTransactions, false);
+    });
+
+    test('fromViewHierarchy', () async {
+      final view = SentryViewHierarchy('flutter');
+      final attachment = SentryAttachment.fromViewHierarchy(view);
+
+      expect(attachment.attachmentType, SentryAttachment.typeViewHierarchy);
+      expect(attachment.contentType, 'application/json');
+      expect(attachment.filename, 'view-hierarchy.json');
+      expect(attachment.addToTransactions, false);
+    });
   });
 }
 

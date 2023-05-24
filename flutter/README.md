@@ -10,18 +10,20 @@ Sentry SDK for Flutter
 
 | package | build | pub | likes | popularity | pub points |
 | ------- | ------- | ------- | ------- | ------- | ------- |
-| sentry_flutter | [![build](https://github.com/getsentry/sentry-dart/workflows/sentry-flutter/badge.svg?branch=main)](https://github.com/getsentry/sentry-dart/actions?query=workflow%3Asentry-flutter) | [![pub package](https://img.shields.io/pub/v/sentry_flutter.svg)](https://pub.dev/packages/sentry_flutter) | [![likes](https://badges.bar/sentry_flutter/likes)](https://pub.dev/packages/sentry_flutter/score) | [![popularity](https://badges.bar/sentry_flutter/popularity)](https://pub.dev/packages/sentry_flutter/score) | [![pub points](https://badges.bar/sentry_flutter/pub%20points)](https://pub.dev/packages/sentry_flutter/score)
+| sentry_flutter | [![build](https://github.com/getsentry/sentry-dart/workflows/sentry-flutter/badge.svg?branch=main)](https://github.com/getsentry/sentry-dart/actions?query=workflow%3Asentry-flutter) | [![pub package](https://img.shields.io/pub/v/sentry_flutter.svg)](https://pub.dev/packages/sentry_flutter) | [![likes](https://img.shields.io/pub/likes/sentry_flutter)](https://pub.dev/packages/sentry_flutter/score) | [![popularity](https://img.shields.io/pub/popularity/sentry_flutter)](https://pub.dev/packages/sentry_flutter/score) | [![pub points](https://img.shields.io/pub/points/sentry_flutter)](https://pub.dev/packages/sentry_flutter/score)
 
 This package includes support to native crashes through Sentry's native SDKs: ([Android](https://github.com/getsentry/sentry-java) and [iOS](https://github.com/getsentry/sentry-cocoa)).
 It will capture errors in the native layer, including (Java/Kotlin/C/C++ for Android and Objective-C/Swift for iOS).
 
 #### Usage
 
-- Sign up for a Sentry.io account and get a DSN at http://sentry.io.
+- Sign up for a Sentry.io account and get a DSN at https://sentry.io.
 
 - Follow the installing instructions on [pub.dev](https://pub.dev/packages/sentry_flutter/install).
 
 - Initialize the Sentry SDK using the DSN issued by Sentry.io:
+
+- The SDK already runs your init `callback` on an error handler, such as [`runZonedGuarded`](https://api.flutter.dev/flutter/dart-async/runZonedGuarded.html) on Flutter versions prior to `3.3`, or [`PlatformDispatcher.onError`](https://api.flutter.dev/flutter/dart-ui/PlatformDispatcher/onError.html) on Flutter versions 3.3 and higher, so that errors are automatically captured.
 
 ```dart
 import 'package:flutter/widgets.dart';
@@ -38,7 +40,7 @@ Future<void> main() async {
 }
 ```
 
-Or, if you want to run your app in your own error zone [runZonedGuarded](https://api.flutter.dev/flutter/dart-async/runZonedGuarded.html):
+Prior to Flutter 3.3, if you want to run your app in your own error zone [runZonedGuarded](https://api.flutter.dev/flutter/dart-async/runZonedGuarded.html):
 
 ```dart
 import 'dart:async';
@@ -99,8 +101,6 @@ runApp(
 
 This adds performance tracing for all `AssetBundle` usages, where the `AssetBundle` is accessed with `DefaultAssetBunlde.of(context)`.
 This includes all of Flutters internal access of `AssetBundle`s, like `Image.asset` for example.
-Tracing for `AssetBundle.loadStructuredData()` is currently disabled.
-It's hidden by the `enableStructureDataTracing` flag and considered experimental. Using it could lead to bugs. We recognize the irony.
 
 ##### Tracking HTTP events
 
@@ -108,7 +108,6 @@ Please see the instructions [here](https://pub.dev/packages/sentry).
 
 ##### Known limitations
 
-- Flutter `split-debug-info` and `obfuscate` flags aren't supported on iOS yet, but only on Android, if this feature is enabled, Dart stack traces are not human readable
 - If you enable the `split-debug-info` feature, you must upload the Debug Symbols manually.
 - Layout related errors are only caught by [FlutterError.onError](https://api.flutter.dev/flutter/foundation/FlutterError/onError.html) in debug mode. In release mode, they are removed by the Flutter framework. See [Flutter build modes](https://flutter.dev/docs/testing/build-modes).
 
@@ -122,10 +121,9 @@ Or [try out the Alpha version of the Sentry Dart Plugin](https://github.com/gets
 
 - Use a `try/catch` block.
 - Use a `catchError` block for `Futures`, examples on [dart.dev](https://dart.dev/guides/libraries/futures-error-handling).
-- The SDK already runs your `callback` on an error handler, e.g. using [runZonedGuarded](https://api.flutter.dev/flutter/dart-async/runZonedGuarded.html), events caught by the `runZonedGuarded` are captured automatically.
 - [Flutter-specific errors](https://api.flutter.dev/flutter/foundation/FlutterError/onError.html) are captured automatically.
 - [Current Isolate errors](https://api.flutter.dev/flutter/dart-isolate/Isolate/addErrorListener.html) which is the equivalent of a main or UI thread, are captured automatically (Only for non-Web Apps).
-- For your own `Isolates`, add an [Error Listener](https://api.flutter.dev/flutter/dart-isolate/Isolate/addErrorListener.html) and call `Sentry.captureException`.
+- For your own `Isolates`, add an [Error Listener](https://api.flutter.dev/flutter/dart-isolate/Isolate/addErrorListener.html) by calling `isolate.addSentryErrorListener()`.
 
 #### Resources
 

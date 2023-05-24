@@ -1,5 +1,4 @@
 // See https://docs.sentry.io/platforms/dotnet/guides/aspnetcore/configuration/options/#max-request-body-size
-import 'package:meta/meta.dart';
 
 const _mediumSize = 10000;
 const _smallSize = 4000;
@@ -23,18 +22,16 @@ enum MaxRequestBodySize {
 
 extension MaxRequestBodySizeX on MaxRequestBodySize {
   bool shouldAddBody(int contentLength) {
-    if (this == MaxRequestBodySize.never) {
-      return false;
-    }
-    if (this == MaxRequestBodySize.always) {
-      return true;
-    }
-    if (this == MaxRequestBodySize.medium && contentLength <= _mediumSize) {
-      return true;
-    }
-
-    if (this == MaxRequestBodySize.small && contentLength <= _smallSize) {
-      return true;
+    switch (this) {
+      case MaxRequestBodySize.never:
+        break;
+      case MaxRequestBodySize.small:
+        return contentLength <= _smallSize;
+      case MaxRequestBodySize.medium:
+        return contentLength <= _mediumSize;
+      case MaxRequestBodySize.always:
+        return true;
+      // No default here to get a warning when a new enum value is added.
     }
     return false;
   }
@@ -42,7 +39,6 @@ extension MaxRequestBodySizeX on MaxRequestBodySize {
 
 /// Describes the size of http response bodies which should be added to an event
 /// This enum might be removed at any time.
-@experimental
 enum MaxResponseBodySize {
   /// Response bodies are never sent
   never,
@@ -61,18 +57,16 @@ enum MaxResponseBodySize {
 
 extension MaxResponseBodySizeX on MaxResponseBodySize {
   bool shouldAddBody(int contentLength) {
-    if (this == MaxResponseBodySize.never) {
-      return false;
-    }
-    if (this == MaxResponseBodySize.always) {
-      return true;
-    }
-    if (this == MaxResponseBodySize.medium && contentLength <= _mediumSize) {
-      return true;
-    }
-
-    if (this == MaxResponseBodySize.small && contentLength <= _smallSize) {
-      return true;
+    switch (this) {
+      case MaxResponseBodySize.never:
+        break;
+      case MaxResponseBodySize.small:
+        return contentLength <= _smallSize;
+      case MaxResponseBodySize.medium:
+        return contentLength <= _mediumSize;
+      case MaxResponseBodySize.always:
+        return true;
+      // No default here to get a warning when a new enum value is added.
     }
     return false;
   }

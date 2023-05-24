@@ -4,9 +4,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mockito/mockito.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
-import 'package:sentry_flutter/src/binding_utils.dart';
 import 'package:sentry_flutter/src/widgets_binding_observer.dart';
 
+import 'mocks.dart';
 import 'mocks.mocks.dart';
 
 void main() {
@@ -17,10 +17,12 @@ void main() {
     setUp(() {
       TestWidgetsFlutterBinding.ensureInitialized();
 
-      flutterTrackingEnabledOptions = SentryFlutterOptions();
+      flutterTrackingEnabledOptions = SentryFlutterOptions()
+        ..bindingUtils = TestBindingWrapper();
       flutterTrackingEnabledOptions.useFlutterBreadcrumbTracking();
 
-      flutterTrackingDisabledOptions = SentryFlutterOptions();
+      flutterTrackingDisabledOptions = SentryFlutterOptions()
+        ..bindingUtils = TestBindingWrapper();
       flutterTrackingDisabledOptions.useNativeBreadcrumbTracking();
     });
 
@@ -31,13 +33,14 @@ void main() {
         hub: hub,
         options: flutterTrackingEnabledOptions,
       );
-      final instance = BindingUtils.getWidgetsBindingInstance();
+      final instance = flutterTrackingEnabledOptions.bindingUtils.instance;
       instance!.addObserver(observer);
 
       final message = const JSONMessageCodec()
           .encodeMessage(<String, dynamic>{'type': 'memoryPressure'});
 
       await instance.defaultBinaryMessenger
+          // ignore: deprecated_member_use
           .handlePlatformMessage('flutter/system', message, (_) {});
 
       final breadcrumb =
@@ -64,13 +67,14 @@ void main() {
         hub: hub,
         options: flutterTrackingDisabledOptions,
       );
-      final instance = BindingUtils.getWidgetsBindingInstance();
-      instance!.addObserver(observer);
+      final instance = flutterTrackingDisabledOptions.bindingUtils.instance!;
+      instance.addObserver(observer);
 
       final message = const JSONMessageCodec()
           .encodeMessage(<String, dynamic>{'type': 'memoryPressure'});
 
       await instance.defaultBinaryMessenger
+          // ignore: deprecated_member_use
           .handlePlatformMessage('flutter/system', message, (_) {});
 
       verifyNever(hub.addBreadcrumb(captureAny));
@@ -98,7 +102,7 @@ void main() {
         hub: hub,
         options: flutterTrackingEnabledOptions,
       );
-      final instance = BindingUtils.getWidgetsBindingInstance();
+      final instance = flutterTrackingEnabledOptions.bindingUtils.instance;
       instance!.addObserver(observer);
 
       // paused lifecycle event
@@ -160,8 +164,8 @@ void main() {
         hub: hub,
         options: flutterTrackingDisabledOptions,
       );
-      final instance = BindingUtils.getWidgetsBindingInstance();
-      instance!.addObserver(observer);
+      final instance = flutterTrackingDisabledOptions.bindingUtils.instance!;
+      instance.addObserver(observer);
 
       await sendLifecycle('paused');
 
@@ -180,10 +184,12 @@ void main() {
       final instance = tester.binding;
       instance.addObserver(observer);
 
+      // ignore: deprecated_member_use
       final window = instance.window;
 
       const newWidth = 123.0;
       const newHeight = 456.0;
+      // ignore: deprecated_member_use
       window.physicalSizeTestValue = Size(newWidth, newHeight);
 
       final breadcrumb =
@@ -194,6 +200,7 @@ void main() {
       expect(breadcrumb.type, 'navigation');
       expect(breadcrumb.level, SentryLevel.info);
       expect(breadcrumb.data, <String, dynamic>{
+        // ignore: deprecated_member_use
         'new_pixel_ratio': window.devicePixelRatio,
         'new_height': newHeight,
         'new_width': newWidth,
@@ -212,11 +219,14 @@ void main() {
       final instance = tester.binding;
       instance.addObserver(observer);
 
+      // ignore: deprecated_member_use
       final window = instance.window;
 
+      // ignore: deprecated_member_use
       window.physicalSizeTestValue = window.physicalSize;
 
       const newPixelRatio = 1.618;
+      // ignore: deprecated_member_use
       window.devicePixelRatioTestValue = newPixelRatio;
 
       final breadcrumb =
@@ -228,7 +238,9 @@ void main() {
       expect(breadcrumb.level, SentryLevel.info);
       expect(breadcrumb.data, <String, dynamic>{
         'new_pixel_ratio': newPixelRatio,
+        // ignore: deprecated_member_use
         'new_height': window.physicalSize.height,
+        // ignore: deprecated_member_use
         'new_width': window.physicalSize.width,
       });
 
@@ -246,8 +258,10 @@ void main() {
       final instance = tester.binding;
       instance.addObserver(observer);
 
+      // ignore: deprecated_member_use
       final window = instance.window;
 
+      // ignore: deprecated_member_use
       window.viewInsetsTestValue = WindowPadding.zero;
 
       verifyNever(hub.addBreadcrumb(captureAny));
@@ -263,9 +277,10 @@ void main() {
         hub: hub,
         options: flutterTrackingDisabledOptions,
       );
-      final instance = BindingUtils.getWidgetsBindingInstance();
-      instance!.addObserver(observer);
+      final instance = flutterTrackingDisabledOptions.bindingUtils.instance!;
+      instance.addObserver(observer);
 
+      // ignore: deprecated_member_use
       final window = instance.window;
 
       window.onMetricsChanged!();
@@ -282,13 +297,15 @@ void main() {
         hub: hub,
         options: flutterTrackingEnabledOptions,
       );
-      final instance = BindingUtils.getWidgetsBindingInstance();
-      instance!.addObserver(observer);
+      final instance = flutterTrackingEnabledOptions.bindingUtils.instance!;
+      instance.addObserver(observer);
 
+      // ignore: deprecated_member_use
       final window = instance.window;
 
       window.onPlatformBrightnessChanged!();
 
+      // ignore: deprecated_member_use
       final brightness = instance.window.platformBrightness;
       final brightnessDescription =
           brightness == Brightness.dark ? 'dark' : 'light';
@@ -317,9 +334,10 @@ void main() {
         hub: hub,
         options: flutterTrackingDisabledOptions,
       );
-      final instance = BindingUtils.getWidgetsBindingInstance();
-      instance!.addObserver(observer);
+      final instance = flutterTrackingDisabledOptions.bindingUtils.instance!;
+      instance.addObserver(observer);
 
+      // ignore: deprecated_member_use
       final window = instance.window;
 
       window.onPlatformBrightnessChanged!();
@@ -337,13 +355,15 @@ void main() {
         hub: hub,
         options: flutterTrackingEnabledOptions,
       );
-      final instance = BindingUtils.getWidgetsBindingInstance();
-      instance!.addObserver(observer);
+      final instance = flutterTrackingEnabledOptions.bindingUtils.instance!;
+      instance.addObserver(observer);
 
+      // ignore: deprecated_member_use
       final window = instance.window;
 
       window.onTextScaleFactorChanged!();
 
+      // ignore: deprecated_member_use
       final newTextScaleFactor = instance.window.textScaleFactor;
 
       final breadcrumb =
@@ -367,9 +387,10 @@ void main() {
 
       final observer = SentryWidgetsBindingObserver(
           hub: hub, options: flutterTrackingDisabledOptions);
-      final instance = BindingUtils.getWidgetsBindingInstance();
-      instance!.addObserver(observer);
+      final instance = flutterTrackingDisabledOptions.bindingUtils.instance!;
+      instance.addObserver(observer);
 
+      // ignore: deprecated_member_use
       final window = instance.window;
 
       window.onTextScaleFactorChanged!();

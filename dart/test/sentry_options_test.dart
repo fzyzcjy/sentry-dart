@@ -1,6 +1,7 @@
 import 'package:http/http.dart';
 import 'package:sentry/sentry.dart';
 import 'package:sentry/src/noop_client.dart';
+import 'package:sentry/src/version.dart';
 import 'package:test/test.dart';
 
 import 'mocks.dart';
@@ -34,9 +35,13 @@ void main() {
 
   test('SentryLogger sets a diagnostic logger', () {
     final options = SentryOptions(dsn: fakeDsn);
+    // ignore: deprecated_member_use_from_same_package
+    expect(options.logger, noOpLogger);
+    // ignore: deprecated_member_use_from_same_package
     options.logger = dartLogger;
 
-    expect(false, options.logger == noOpLogger);
+    // ignore: deprecated_member_use_from_same_package
+    expect(options.logger, isNot(noOpLogger));
   });
 
   test('tracesSampler is null by default', () {
@@ -84,5 +89,42 @@ void main() {
                 element.name == 'test' && element.version == '1.2.3')
             .isNotEmpty,
         true);
+  });
+
+  test('SentryOptions has all targets by default', () {
+    final options = SentryOptions.empty();
+
+    expect(options.tracePropagationTargets, ['.*']);
+  });
+
+  test('SentryOptions has sentryClientName set', () {
+    final options = SentryOptions(dsn: fakeDsn);
+
+    expect(options.sentryClientName,
+        '${sdkName(options.platformChecker.isWeb)}/$sdkVersion');
+  });
+
+  test('SentryOptions has default idleTimeout', () {
+    final options = SentryOptions.empty();
+
+    expect(options.idleTimeout?.inSeconds, Duration(seconds: 3).inSeconds);
+  });
+
+  test('when enableTracing is set to true tracing is considered enabled', () {
+    final options = SentryOptions.empty();
+    options.enableTracing = true;
+
+    expect(options.isTracingEnabled(), true);
+  });
+
+  test('when enableTracing is set to false tracing is considered disabled', () {
+    final options = SentryOptions.empty();
+    options.enableTracing = false;
+    options.tracesSampleRate = 1.0;
+    options.tracesSampler = (_) {
+      return 1.0;
+    };
+
+    expect(options.isTracingEnabled(), false);
   });
 }

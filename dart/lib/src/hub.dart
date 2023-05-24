@@ -69,7 +69,7 @@ class Hub {
   Future<SentryId> captureEvent(
     SentryEvent event, {
     dynamic stackTrace,
-    dynamic hint,
+    Hint? hint,
     ScopeCallback? withScope,
   }) async {
     var sentryId = SentryId.empty();
@@ -81,7 +81,13 @@ class Hub {
       );
     } else {
       final item = _peek();
-      var scope = await _cloneAndRunWithScope(item.scope, withScope);
+      late Scope scope;
+      final s = _cloneAndRunWithScope(item.scope, withScope);
+      if (s is Future<Scope>) {
+        scope = await s;
+      } else {
+        scope = s;
+      }
 
       try {
         if (_options.isTracingEnabled()) {
@@ -114,7 +120,7 @@ class Hub {
   Future<SentryId> captureException(
     dynamic throwable, {
     dynamic stackTrace,
-    dynamic hint,
+    Hint? hint,
     ScopeCallback? withScope,
   }) async {
     var sentryId = SentryId.empty();
@@ -131,7 +137,13 @@ class Hub {
       );
     } else {
       final item = _peek();
-      var scope = await _cloneAndRunWithScope(item.scope, withScope);
+      late Scope scope;
+      final s = _cloneAndRunWithScope(item.scope, withScope);
+      if (s is Future<Scope>) {
+        scope = await s;
+      } else {
+        scope = s;
+      }
 
       try {
         var event = SentryEvent(
@@ -172,7 +184,7 @@ class Hub {
     SentryLevel? level,
     String? template,
     List<dynamic>? params,
-    dynamic hint,
+    Hint? hint,
     ScopeCallback? withScope,
   }) async {
     var sentryId = SentryId.empty();
@@ -189,8 +201,13 @@ class Hub {
       );
     } else {
       final item = _peek();
-      var scope = await _cloneAndRunWithScope(item.scope, withScope);
-      scope = await _applyOptionsBeforeCaptureWithScope(scope, null);
+      late Scope scope;
+      final s = _cloneAndRunWithScope(item.scope, withScope);
+      if (s is Future<Scope>) {
+        scope = await s;
+      } else {
+        scope = s;
+      }
 
       try {
         sentryId = await item.client.captureMessage(
@@ -244,11 +261,26 @@ class Hub {
     }
   }
 
-  Future<Scope> _cloneAndRunWithScope(
+  FutureOr<Scope> _cloneAndRunWithScope(
       Scope scope, ScopeCallback? withScope) async {
     if (withScope != null) {
-      scope = scope.clone();
-      await withScope(scope);
+      try {
+        scope = scope.clone();
+        final s = withScope(scope);
+        if (s is Future) {
+          await s;
+        }
+      } catch (exception, stackTrace) {
+        _options.logger(
+          SentryLevel.error,
+          'Exception in withScope callback.',
+          exception: exception,
+          stackTrace: stackTrace,
+        );
+        if (_options.devMode) {
+          rethrow;
+        }
+      }
     }
     return scope;
   }
@@ -263,7 +295,7 @@ class Hub {
   }
 
   /// Adds a breacrumb to the current Scope
-  Future<void> addBreadcrumb(Breadcrumb crumb, {dynamic hint}) async {
+  Future<void> addBreadcrumb(Breadcrumb crumb, {Hint? hint}) async {
     if (!_isEnabled) {
       _options.logger(
         SentryLevel.warning,
@@ -311,7 +343,10 @@ class Hub {
     } else {
       // close integrations
       for (final integration in _options.integrations) {
-        await integration.close();
+        final close = integration.close();
+        if (close is Future) {
+          await close;
+        }
       }
 
       final item = _peek();
@@ -342,12 +377,18 @@ class Hub {
       final item = _peek();
 
       try {
-        await callback(item.scope);
+        final result = callback(item.scope);
+        if (result is Future) {
+          await result;
+        }
       } catch (err) {
         _options.logger(
           SentryLevel.error,
           "Error in the 'configureScope' callback, error: $err",
         );
+        if (_options.devMode) {
+          rethrow;
+        }
       }
     }
   }
@@ -408,9 +449,10 @@ class Hub {
           transactionContext, customSamplingContext ?? {});
 
       // if transactionContext has no sampled decision, run the traces sampler
-      if (transactionContext.sampled == null) {
-        final sampled = _tracesSampler.sample(samplingContext);
-        transactionContext = transactionContext.copyWith(sampled: sampled);
+      if (transactionContext.samplingDecision == null) {
+        final samplingDecision = _tracesSampler.sample(samplingContext);
+        transactionContext =
+            transactionContext.copyWith(samplingDecision: samplingDecision);
       }
 
       final tracer = SentryTracer(
@@ -455,7 +497,10 @@ class Hub {
   }
 
   @internal
-  Future<SentryId> captureTransaction(SentryTransaction transaction) async {
+  Future<SentryId> captureTransaction(
+    SentryTransaction transaction, {
+    SentryTraceContextHeader? traceContext,
+  }) async {
     var sentryId = SentryId.empty();
 
     if (!_isEnabled) {
@@ -490,6 +535,7 @@ class Hub {
           sentryId = await item.client.captureTransaction(
             transaction,
             scope: item.scope,
+            traceContext: traceContext,
           );
         } catch (exception, stackTrace) {
           _options.logger(
@@ -521,7 +567,7 @@ class Hub {
         final span = pair.key;
         final spanContext = span.context;
         event.contexts.trace = spanContext.toTraceContext(
-          sampled: span.sampled,
+          sampled: span.samplingDecision?.sampled,
         );
 
         // set transaction name to event.transaction

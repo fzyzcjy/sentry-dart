@@ -8,7 +8,7 @@ import 'version.dart';
 
 /// An [Integration] which listens to all messages of the
 /// [logging](https://pub.dev/packages/logging) package.
-class LoggingIntegration extends Integration<SentryOptions> {
+class LoggingIntegration implements Integration<SentryOptions> {
   /// Creates the [LoggingIntegration].
   ///
   /// All log events equal or higher than [minBreadcrumbLevel] are recorded as a
@@ -27,7 +27,7 @@ class LoggingIntegration extends Integration<SentryOptions> {
   late Hub _hub;
 
   @override
-  FutureOr<void> call(Hub hub, SentryOptions options) {
+  void call(Hub hub, SentryOptions options) {
     _hub = hub;
     _subscription = Logger.root.onRecord.listen(
       _onLog,
@@ -58,11 +58,15 @@ class LoggingIntegration extends Integration<SentryOptions> {
       await _hub.captureEvent(
         record.toEvent(),
         stackTrace: record.stackTrace,
+        hint: Hint.withMap({TypeCheckHint.record: record}),
       );
     }
 
     if (_isLoggable(record.level, _minBreadcrumbLevel)) {
-      await _hub.addBreadcrumb(record.toBreadcrumb());
+      await _hub.addBreadcrumb(
+        record.toBreadcrumb(),
+        hint: Hint.withMap({TypeCheckHint.record: record}),
+      );
     }
   }
 }

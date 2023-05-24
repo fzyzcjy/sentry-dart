@@ -7,6 +7,8 @@ import '../sentry_tracer.dart';
 import '../tracing.dart';
 import '../utils.dart';
 
+typedef OnFinishedCallback = Future<void> Function({DateTime? endTimestamp});
+
 class SentrySpan extends ISentrySpan {
   final SentrySpanContext _context;
   DateTime? _endTimestamp;
@@ -19,20 +21,20 @@ class SentrySpan extends ISentrySpan {
 
   SpanStatus? _status;
   final Map<String, String> _tags = {};
-  void Function({DateTime? endTimestamp})? _finishedCallback;
+  OnFinishedCallback? _finishedCallback;
 
   @override
-  bool? sampled;
+  final SentryTracesSamplingDecision? samplingDecision;
 
   SentrySpan(
     this._tracer,
     this._context,
     this._hub, {
     DateTime? startTimestamp,
-    this.sampled,
-    Function({DateTime? endTimestamp})? finishedCallback,
+    this.samplingDecision,
+    OnFinishedCallback? finishedCallback,
   }) {
-    _startTimestamp = startTimestamp?.toUtc() ?? getUtcDateTime();
+    _startTimestamp = startTimestamp?.toUtc() ?? _hub.options.clock();
     _finishedCallback = finishedCallback;
   }
 
@@ -42,27 +44,27 @@ class SentrySpan extends ISentrySpan {
       return;
     }
 
-    final utcDateTime = getUtcDateTime();
-
     if (status != null) {
       _status = status;
     }
 
-    if (endTimestamp?.isBefore(_startTimestamp) ?? false) {
+    if (endTimestamp == null) {
+      _endTimestamp = _hub.options.clock();
+    } else if (endTimestamp.isBefore(_startTimestamp)) {
       _hub.options.logger(
         SentryLevel.warning,
         'End timestamp ($endTimestamp) cannot be before start timestamp ($_startTimestamp)',
       );
-      _endTimestamp = utcDateTime;
+      _endTimestamp = _hub.options.clock();
     } else {
-      _endTimestamp = endTimestamp?.toUtc() ?? utcDateTime;
+      _endTimestamp = endTimestamp.toUtc();
     }
 
     // associate error
     if (_throwable != null) {
       _hub.setSpanContext(_throwable, this, _tracer.name);
     }
-    _finishedCallback?.call(endTimestamp: _endTimestamp);
+    await _finishedCallback?.call(endTimestamp: _endTimestamp);
     return super.finish(status: status, endTimestamp: _endTimestamp);
   }
 
@@ -180,6 +182,24 @@ class SentrySpan extends ISentrySpan {
   SentryTraceHeader toSentryTrace() => SentryTraceHeader(
         _context.traceId,
         _context.spanId,
-        sampled: sampled,
+        sampled: samplingDecision?.sampled,
       );
+
+  @override
+  void setMeasurement(
+    String name,
+    num value, {
+    SentryMeasurementUnit? unit,
+  }) {
+    _tracer.setMeasurement(name, value, unit: unit);
+  }
+
+  @override
+  SentryBaggageHeader? toBaggageHeader() => _tracer.toBaggageHeader();
+
+  @override
+  SentryTraceContextHeader? traceContext() => _tracer.traceContext();
+
+  @override
+  void scheduleFinish() => _tracer.scheduleFinish();
 }

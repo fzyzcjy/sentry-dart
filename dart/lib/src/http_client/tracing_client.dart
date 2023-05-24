@@ -2,6 +2,9 @@ import 'package:http/http.dart';
 import '../hub.dart';
 import '../hub_adapter.dart';
 import '../protocol.dart';
+import '../tracing.dart';
+import '../utils/tracing_utils.dart';
+import '../utils/http_sanitizer.dart';
 
 /// A [http](https://pub.dev/packages/http)-package compatible HTTP client
 /// which adds support to Sentry Performance feature.
@@ -17,20 +20,41 @@ class TracingClient extends BaseClient {
   @override
   Future<StreamedResponse> send(BaseRequest request) async {
     // see https://develop.sentry.dev/sdk/performance/#header-sentry-trace
+
+    final urlDetails = HttpSanitizer.sanitizeUrl(request.url.toString());
+
+    var description = request.method;
+    if (urlDetails != null) {
+      description += ' ${urlDetails.urlOrFallback}';
+    }
+
     final currentSpan = _hub.getSpan();
-    final span = currentSpan?.startChild(
+    var span = currentSpan?.startChild(
       'http.client',
-      description: '${request.method} ${request.url}',
+      description: description,
     );
+
+    // if the span is NoOp, we don't want to attach headers
+    if (span is NoOpSentrySpan) {
+      span = null;
+    }
+
+    span?.setData('http.method', request.method);
+    urlDetails?.applyToSpan(span);
 
     StreamedResponse? response;
     try {
       if (span != null) {
-        final traceHeader = span.toSentryTrace();
-        request.headers[traceHeader.name] = traceHeader.value;
+        if (containsTargetOrMatchesRegExp(
+            _hub.options.tracePropagationTargets, request.url.toString())) {
+          addSentryTraceHeader(span, request.headers);
+          addBaggageHeader(
+            span,
+            request.headers,
+            logger: _hub.options.logger,
+          );
+        }
       }
-
-      // TODO: tracingOrigins support
 
       response = await _client.send(request);
       span?.status = SpanStatus.fromHttpStatusCode(response.statusCode);

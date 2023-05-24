@@ -7,7 +7,7 @@ import '../sentry_native_channel.dart';
 
 /// EventProcessor that enriches [SentryTransaction] objects with app start
 /// measurement.
-class NativeAppStartEventProcessor extends EventProcessor {
+class NativeAppStartEventProcessor implements EventProcessor {
   /// We filter out App starts more than 60s
   static const _maxAppStartMillis = 60000;
 
@@ -18,7 +18,7 @@ class NativeAppStartEventProcessor extends EventProcessor {
   final SentryNative _native;
 
   @override
-  FutureOr<SentryEvent?> apply(SentryEvent event, {hint}) async {
+  Future<SentryEvent?> apply(SentryEvent event, {Hint? hint}) async {
     final appStartEnd = _native.appStartEnd;
 
     if (appStartEnd != null &&
@@ -40,7 +40,7 @@ class NativeAppStartEventProcessor extends EventProcessor {
       if (measurement.value >= _maxAppStartMillis) {
         return event;
       }
-      event.measurements.add(measurement);
+      event.measurements[measurement.name] = measurement;
     }
     return event;
   }

@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:collection/collection.dart';
 import 'package:sentry/sentry.dart';
 import 'package:sentry/src/sentry_tracer.dart';
@@ -35,8 +33,7 @@ void main() {
   test('sets transaction overwrites span name', () {
     final sut = fixture.getSut();
 
-    final tracer = SentryTracer(fixture.context, MockHub());
-    sut.span = tracer;
+    sut.span = fixture.sentryTracer;
     sut.transaction = 'test';
 
     expect(sut.transaction, 'test');
@@ -46,11 +43,29 @@ void main() {
   test('sets span overwrites transaction name', () {
     final sut = fixture.getSut();
 
-    final tracer = SentryTracer(fixture.context, MockHub());
-    sut.span = tracer;
+    sut.span = fixture.sentryTracer;
 
     expect(sut.transaction, 'name');
     expect((sut.span as SentryTracer).name, 'name');
+  });
+
+  test('removing span resets transaction if not set separately', () {
+    final sut = fixture.getSut();
+
+    sut.span = fixture.sentryTracer;
+    sut.span = null;
+
+    expect(sut.transaction, isNull);
+  });
+
+  test('removing span does not reset transaction if set separately', () {
+    final sut = fixture.getSut();
+
+    sut.transaction = 'test';
+    sut.span = fixture.sentryTracer;
+    sut.span = null;
+
+    expect(sut.transaction, 'test');
   });
 
   test('sets $SentryUser', () {
@@ -312,6 +327,10 @@ void main() {
     sut.addAttachment(SentryAttachment.fromIntList([0, 0, 0, 0], 'test.txt'));
     sut.span = NoOpSentrySpan();
     sut.level = SentryLevel.warning;
+    await sut.setUser(SentryUser(id: 'id'));
+    await sut.setTag('key', 'vakye');
+    await sut.setExtra('key', 'vakye');
+    sut.transaction = 'transaction';
 
     final clone = sut.clone();
     expect(sut.user, clone.user);
@@ -362,7 +381,7 @@ void main() {
       username: 'first-user',
       email: 'first@user.lan',
       ipAddress: '127.0.0.1',
-      extras: const <String, String>{'first-sign-in': '2020-01-01'},
+      data: const <String, String>{'first-sign-in': '2020-01-01'},
     );
 
     final breadcrumb = Breadcrumb(message: 'Authenticated');
@@ -370,6 +389,7 @@ void main() {
     test('apply context to event', () async {
       final event = SentryEvent(
         tags: const {'etag': '987'},
+        // ignore: deprecated_member_use_from_same_package
         extra: const {'e-infos': 'abc'},
       );
       final scope = Scope(SentryOptions(dsn: fakeDsn))
@@ -394,14 +414,16 @@ void main() {
       expect(updatedEvent?.tags,
           {'etag': '987', 'build': '579', 'page-locale': 'en-us'});
       expect(
-          updatedEvent?.extra, {'e-infos': 'abc', 'company-name': 'Dart Inc'});
+          // ignore: deprecated_member_use_from_same_package
+          updatedEvent?.extra,
+          {'e-infos': 'abc', 'company-name': 'Dart Inc'});
       expect(updatedEvent?.contexts['theme'], {'value': 'material'});
     });
 
     test('apply trace context to event', () async {
-      final tracer = SentryTracer(fixture.context, MockHub());
       final event = SentryEvent();
-      final scope = Scope(SentryOptions(dsn: fakeDsn))..span = tracer;
+      final scope = Scope(SentryOptions(dsn: fakeDsn))
+        ..span = fixture.sentryTracer;
 
       final updatedEvent = await scope.applyToEvent(event);
 
@@ -486,7 +508,7 @@ void main() {
           updatedEvent?.contexts[SentryOperatingSystem.type].name, 'event-os');
     });
 
-    test('should apply the scope.contexts values ', () async {
+    test('should apply the scope.contexts values', () async {
       final event = SentryEvent();
       final scope = Scope(SentryOptions(dsn: fakeDsn));
       await scope.setContexts(
@@ -533,6 +555,16 @@ void main() {
 
       expect(updatedEvent?.level, SentryLevel.error);
     });
+
+    test('should apply the scope transaction from the span', () async {
+      final event = SentryEvent();
+      final scope = Scope(SentryOptions(dsn: fakeDsn))
+        ..span = fixture.sentryTracer;
+
+      final updatedEvent = await scope.applyToEvent(event);
+
+      expect(updatedEvent?.transaction, 'name');
+    });
   });
 
   test('event processor drops the event', () async {
@@ -547,8 +579,7 @@ void main() {
   });
 
   test('should not apply fingerprint if transaction', () async {
-    final tracer = SentryTracer(fixture.context, MockHub());
-    var tr = SentryTransaction(tracer);
+    var tr = SentryTransaction(fixture.sentryTracer);
     final scope = Scope(SentryOptions(dsn: fakeDsn))..fingerprint = ['test'];
 
     final updatedTr = await scope.applyToEvent(tr);
@@ -557,8 +588,7 @@ void main() {
   });
 
   test('should not apply level if transaction', () async {
-    final tracer = SentryTracer(fixture.context, MockHub());
-    var tr = SentryTransaction(tracer);
+    var tr = SentryTransaction(fixture.sentryTracer);
     final scope = Scope(SentryOptions(dsn: fakeDsn))..level = SentryLevel.error;
 
     final updatedTr = await scope.applyToEvent(tr);
@@ -566,11 +596,36 @@ void main() {
     expect(updatedTr?.level, isNull);
   });
 
+  test('apply sampled to trace', () async {
+    var tr = SentryTransaction(fixture.sentryTracer);
+    final scope = Scope(SentryOptions(dsn: fakeDsn))..level = SentryLevel.error;
+
+    final updatedTr = await scope.applyToEvent(tr);
+
+    expect(updatedTr?.contexts.trace?.sampled, isTrue);
+  });
+
   test('addBreadcrumb should call scope observers', () async {
     final sut = fixture.getSut(scopeObserver: fixture.mockScopeObserver);
     await sut.addBreadcrumb(Breadcrumb());
 
     expect(true, fixture.mockScopeObserver.calledAddBreadcrumb);
+  });
+
+  test('addBreadcrumb passes processed breadcrumb to scope observers',
+      () async {
+    final sut = fixture.getSut(
+      scopeObserver: fixture.mockScopeObserver,
+      beforeBreadcrumbCallback: (
+        Breadcrumb? breadcrumb, {
+        Hint? hint,
+      }) {
+        return breadcrumb?.copyWith(message: "modified");
+      },
+    );
+    await sut.addBreadcrumb(Breadcrumb());
+
+    expect(fixture.mockScopeObserver.addedBreadcrumbs[0].message, "modified");
   });
 
   test('clearBreadcrumbs should call scope observers', () async {
@@ -628,23 +683,92 @@ void main() {
 
     expect(true, fixture.mockScopeObserver.calledSetUser);
   });
+
+  group("Scope exceptions", () {
+    test("addBreadcrumb with beforeBreadcrumb error handled ", () async {
+      final exception = Exception("before breadcrumb exception");
+
+      final sut = fixture.getSut(
+          beforeBreadcrumbCallback: (
+            Breadcrumb? breadcrumb, {
+            Hint? hint,
+          }) {
+            throw exception;
+          },
+          debug: true);
+
+      final breadcrumb = Breadcrumb(
+        message: 'test log',
+        timestamp: DateTime.utc(2019),
+      );
+
+      await sut.addBreadcrumb(breadcrumb);
+
+      expect(fixture.loggedException, exception);
+      expect(fixture.loggedLevel, SentryLevel.error);
+    });
+
+    test("clone with beforeBreadcrumb error handled ", () async {
+      var numberOfBeforeBreadcrumbCalls = 0;
+      final exception = Exception("before breadcrumb exception");
+
+      final sut = fixture.getSut(
+          beforeBreadcrumbCallback: (
+            Breadcrumb? breadcrumb, {
+            Hint? hint,
+          }) {
+            if (numberOfBeforeBreadcrumbCalls > 0) {
+              throw exception;
+            }
+            numberOfBeforeBreadcrumbCalls += 1;
+            return breadcrumb;
+          },
+          debug: true);
+
+      final breadcrumb = Breadcrumb(
+        message: 'test log',
+        timestamp: DateTime.utc(2019),
+      );
+      await sut.addBreadcrumb(breadcrumb);
+      sut.clone();
+
+      expect(fixture.loggedException, exception);
+      expect(fixture.loggedLevel, SentryLevel.error);
+    });
+  });
+
+  // addBreadcrumb
+  // clone
 }
 
 class Fixture {
-  final context = SentryTransactionContext(
-    'name',
-    'op',
-  );
   final mockScopeObserver = MockScopeObserver();
+
+  final options = SentryOptions(dsn: fakeDsn);
+
+  final sentryTracer = SentryTracer(
+    SentryTransactionContext(
+      'name',
+      'op',
+      samplingDecision: SentryTracesSamplingDecision(true),
+    ),
+    MockHub(),
+  );
+
+  SentryLevel? loggedLevel;
+  Object? loggedException;
 
   Scope getSut({
     int maxBreadcrumbs = 100,
     BeforeBreadcrumbCallback? beforeBreadcrumbCallback,
     ScopeObserver? scopeObserver,
+    bool debug = false,
   }) {
-    final options = SentryOptions(dsn: fakeDsn);
     options.maxBreadcrumbs = maxBreadcrumbs;
     options.beforeBreadcrumb = beforeBreadcrumbCallback;
+    options.debug = debug;
+    options.logger = mockLogger;
+
     if (scopeObserver != null) {
       options.addScopeObserver(scopeObserver);
     }
@@ -653,22 +777,32 @@ class Fixture {
 
   EventProcessor get processor => DropAllEventProcessor();
 
-  Breadcrumb? beforeBreadcrumbCallback(Breadcrumb? breadcrumb,
-          {dynamic hint}) =>
+  Breadcrumb? beforeBreadcrumbCallback(Breadcrumb? breadcrumb, {Hint? hint}) =>
       null;
 
   Breadcrumb? beforeBreadcrumbMutateCallback(Breadcrumb? breadcrumb,
-          {dynamic hint}) =>
+          {Hint? hint}) =>
       breadcrumb?.copyWith(message: 'new message');
+
+  void mockLogger(
+    SentryLevel level,
+    String message, {
+    String? logger,
+    Object? exception,
+    StackTrace? stackTrace,
+  }) {
+    loggedLevel = level;
+    loggedException = exception;
+  }
 }
 
-class AddTagsEventProcessor extends EventProcessor {
+class AddTagsEventProcessor implements EventProcessor {
   final Map<String, String> tags;
 
   AddTagsEventProcessor(this.tags);
 
   @override
-  FutureOr<SentryEvent?> apply(SentryEvent event, {hint}) {
+  SentryEvent? apply(SentryEvent event, {hint}) {
     return event..tags?.addAll(tags);
   }
 }

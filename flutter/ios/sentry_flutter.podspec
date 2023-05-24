@@ -12,14 +12,15 @@ Sentry SDK for Flutter with support to native through sentry-cocoa.
                          :tag => s.version.to_s }
   s.source_files     = 'Classes/**/*'
   s.public_header_files = 'Classes/**/*.h'
-  s.dependency 'Sentry', '~> 7.24.1'
+  s.dependency 'Sentry/HybridSDK', '8.7.2'
   s.ios.dependency 'Flutter'
   s.osx.dependency 'FlutterMacOS'
-  s.ios.deployment_target = '9.0'
-  s.osx.deployment_target = '10.11'
+  s.ios.deployment_target = '11.0'
+  # Flutter 3.7 requires 10.14
+  s.osx.deployment_target = '10.13'
 
-  # Flutter.framework does not contain a i386 slice. Only x86_64 simulators are supported.
-  s.ios.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'VALID_ARCHS[sdk=iphonesimulator*]' => 'x86_64' }
+  # Flutter.framework does not contain a i386 slice.
+  s.ios.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => '$(inherited) i386' }
   s.osx.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES' }
   s.swift_version = '5.0'
 end

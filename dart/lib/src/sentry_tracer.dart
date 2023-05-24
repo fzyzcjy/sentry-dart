@@ -1,10 +1,10 @@
 import 'dart:async';
 
 import 'package:meta/meta.dart';
-import 'utils.dart';
 
 import '../sentry.dart';
 import 'sentry_tracer_finish_status.dart';
+import 'utils/sample_rate_format.dart';
 
 @internal
 class SentryTracer extends ISentrySpan {
@@ -15,12 +15,21 @@ class SentryTracer extends ISentrySpan {
   late final SentrySpan _rootSpan;
   final List<SentrySpan> _children = [];
   final Map<String, dynamic> _extra = {};
-  final List<SentryMeasurement> _measurements = [];
+  final Map<String, SentryMeasurement> _measurements = {};
 
   Timer? _autoFinishAfterTimer;
-  Function(SentryTracer)? _onFinish;
+  Duration? _autoFinishAfter;
+
+  @visibleForTesting
+  Timer? get autoFinishAfterTimer => _autoFinishAfterTimer;
+
+  OnTransactionFinish? _onFinish;
   var _finishStatus = SentryTracerFinishStatus.notFinishing();
   late final bool _trimEnd;
+
+  late SentryTransactionNameSource transactionNameSource;
+
+  SentryTraceContextHeader? _sentryTraceContextHeader;
 
   /// If [waitForChildren] is true, this transaction will not finish until all
   /// its children are finished.
@@ -42,29 +51,30 @@ class SentryTracer extends ISentrySpan {
     bool waitForChildren = false,
     Duration? autoFinishAfter,
     bool trimEnd = false,
-    Function(SentryTracer)? onFinish,
+    OnTransactionFinish? onFinish,
   }) {
     _rootSpan = SentrySpan(
       this,
       transactionContext,
       _hub,
-      sampled: transactionContext.sampled,
+      samplingDecision: transactionContext.samplingDecision,
       startTimestamp: startTimestamp,
     );
     _waitForChildren = waitForChildren;
-    if (autoFinishAfter != null) {
-      _autoFinishAfterTimer = Timer(autoFinishAfter, () async {
-        await finish(status: status ?? SpanStatus.ok());
-      });
-    }
+    _autoFinishAfter = autoFinishAfter;
+
+    _scheduleTimer();
     name = transactionContext.name;
+    // always default to custom if not provided
+    transactionNameSource = transactionContext.transactionNameSource ??
+        SentryTransactionNameSource.custom;
     _trimEnd = trimEnd;
     _onFinish = onFinish;
   }
 
   @override
   Future<void> finish({SpanStatus? status, DateTime? endTimestamp}) async {
-    final commonEndTimestamp = endTimestamp ?? getUtcDateTime();
+    final commonEndTimestamp = endTimestamp ?? _hub.options.clock();
     _autoFinishAfterTimer?.cancel();
     _finishStatus = SentryTracerFinishStatus.finishing(status);
     if (!_rootSpan.finished &&
@@ -77,11 +87,12 @@ class SentryTracer extends ISentrySpan {
 
       // finish unfinished spans otherwise transaction gets dropped
       final spansToBeFinished = _children.where((span) => !span.finished);
-      await Future.forEach(
-          spansToBeFinished,
-          (SentrySpan span) async => await span.finish(
-              status: SpanStatus.deadlineExceeded(),
-              endTimestamp: commonEndTimestamp));
+      for (final span in spansToBeFinished) {
+        await span.finish(
+          status: SpanStatus.deadlineExceeded(),
+          endTimestamp: commonEndTimestamp,
+        );
+      }
 
       var _rootEndTimestamp = commonEndTimestamp;
       if (_trimEnd && children.isNotEmpty) {
@@ -98,8 +109,13 @@ class SentryTracer extends ISentrySpan {
         }
       }
 
+      // the callback should run before because if the span is finished,
+      // we cannot attach data, its immutable after being finished.
+      final finish = _onFinish?.call(this);
+      if (finish is Future) {
+        await finish;
+      }
       await _rootSpan.finish(endTimestamp: _rootEndTimestamp);
-      await _onFinish?.call(this);
 
       // remove from scope
       await _hub.configureScope((scope) {
@@ -108,9 +124,17 @@ class SentryTracer extends ISentrySpan {
         }
       });
 
+      // if it's an idle transaction which has no children, we drop it to save user's quota
+      if (children.isEmpty && _autoFinishAfter != null) {
+        return;
+      }
+
       final transaction = SentryTransaction(this);
       transaction.measurements.addAll(_measurements);
-      await _hub.captureTransaction(transaction);
+      await _hub.captureTransaction(
+        transaction,
+        traceContext: traceContext(),
+      );
     }
   }
 
@@ -185,6 +209,9 @@ class SentryTracer extends ISentrySpan {
       return NoOpSentrySpan();
     }
 
+    // reset the timer if a new child is added
+    _scheduleTimer();
+
     if (children.length >= _hub.options.maxSpans) {
       _hub.options.logger(
         SentryLevel.warning,
@@ -199,18 +226,27 @@ class SentryTracer extends ISentrySpan {
         operation: operation,
         description: description);
 
-    final child = SentrySpan(this, context, _hub,
-        sampled: _rootSpan.sampled, startTimestamp: startTimestamp,
-        finishedCallback: ({DateTime? endTimestamp}) {
-      final finishStatus = _finishStatus;
-      if (finishStatus.finishing) {
-        finish(status: finishStatus.status, endTimestamp: endTimestamp);
-      }
-    });
+    final child = SentrySpan(
+      this,
+      context,
+      _hub,
+      samplingDecision: _rootSpan.samplingDecision,
+      startTimestamp: startTimestamp,
+      finishedCallback: _finishedCallback,
+    );
 
     _children.add(child);
 
     return child;
+  }
+
+  Future<void> _finishedCallback({
+    DateTime? endTimestamp,
+  }) async {
+    final finishStatus = _finishStatus;
+    if (finishStatus.finishing) {
+      await finish(status: finishStatus.status, endTimestamp: endTimestamp);
+    }
   }
 
   @override
@@ -244,17 +280,11 @@ class SentryTracer extends ISentrySpan {
   Map<String, String> get tags => _rootSpan.tags;
 
   @override
-  bool? get sampled => _rootSpan.sampled;
-
-  @override
   SentryTraceHeader toSentryTrace() => _rootSpan.toSentryTrace();
 
-  void addMeasurements(List<SentryMeasurement> measurements) {
-    _measurements.addAll(measurements);
-  }
-
   @visibleForTesting
-  List<SentryMeasurement> get measurements => _measurements;
+  Map<String, SentryMeasurement> get measurements =>
+      Map.unmodifiable(_measurements);
 
   bool _haveAllChildrenFinished() {
     for (final child in children) {
@@ -269,4 +299,84 @@ class SentryTracer extends ISentrySpan {
           SentrySpan span, DateTime endTimestampCandidate) =>
       !span.startTimestamp
           .isAfter((span.endTimestamp ?? endTimestampCandidate));
+
+  @override
+  void setMeasurement(String name, num value, {SentryMeasurementUnit? unit}) {
+    if (finished) {
+      return;
+    }
+    final measurement = SentryMeasurement(name, value, unit: unit);
+    _measurements[name] = measurement;
+  }
+
+  @override
+  SentryBaggageHeader? toBaggageHeader() {
+    final context = traceContext();
+
+    if (context != null) {
+      final baggage = context.toBaggage(logger: _hub.options.logger);
+      return SentryBaggageHeader.fromBaggage(baggage);
+    }
+    return null;
+  }
+
+  @override
+  SentryTraceContextHeader? traceContext() {
+    // TODO: freeze context after 1st envelope or outgoing HTTP request
+    if (_sentryTraceContextHeader != null) {
+      return _sentryTraceContextHeader;
+    }
+
+    SentryUser? user;
+    _hub.configureScope((scope) => user = scope.user);
+
+    _sentryTraceContextHeader = SentryTraceContextHeader(
+      _rootSpan.context.traceId,
+      Dsn.parse(_hub.options.dsn!).publicKey,
+      release: _hub.options.release,
+      environment: _hub.options.environment,
+      userId: null, // because of PII not sending it for now
+      userSegment: user?.segment,
+      transaction:
+          _isHighQualityTransactionName(transactionNameSource) ? name : null,
+      sampleRate: _sampleRateToString(_rootSpan.samplingDecision?.sampleRate),
+    );
+
+    return _sentryTraceContextHeader;
+  }
+
+  String? _sampleRateToString(double? sampleRate) {
+    if (!isValidSampleRate(sampleRate)) {
+      return null;
+    }
+    return sampleRate != null ? SampleRateFormat().format(sampleRate) : null;
+  }
+
+  bool _isHighQualityTransactionName(SentryTransactionNameSource source) {
+    return source != SentryTransactionNameSource.url;
+  }
+
+  @override
+  SentryTracesSamplingDecision? get samplingDecision =>
+      _rootSpan.samplingDecision;
+
+  @override
+  void scheduleFinish() {
+    if (finished) {
+      return;
+    }
+    if (_autoFinishAfterTimer != null) {
+      _scheduleTimer();
+    }
+  }
+
+  void _scheduleTimer() {
+    final autoFinishAfter = _autoFinishAfter;
+    if (autoFinishAfter != null) {
+      _autoFinishAfterTimer?.cancel();
+      _autoFinishAfterTimer = Timer(autoFinishAfter, () async {
+        await finish(status: status ?? SpanStatus.ok());
+      });
+    }
+  }
 }

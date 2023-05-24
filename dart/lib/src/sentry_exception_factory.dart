@@ -1,3 +1,4 @@
+import 'recursive_exception_cause_extractor.dart';
 import 'protocol.dart';
 import 'sentry_options.dart';
 import 'sentry_stack_trace_factory.dart';
@@ -9,6 +10,8 @@ class SentryExceptionFactory {
 
   SentryStackTraceFactory get _stacktraceFactory => _options.stackTraceFactory;
 
+  late final extractor = RecursiveExceptionCauseExtractor(_options);
+
   SentryExceptionFactory(this._options);
 
   SentryException getSentryException(
@@ -17,19 +20,29 @@ class SentryExceptionFactory {
   }) {
     var throwable = exception;
     Mechanism? mechanism;
+    bool? snapshot;
     if (exception is ThrowableMechanism) {
       throwable = exception.throwable;
       mechanism = exception.mechanism;
+      snapshot = exception.snapshot;
     }
 
     if (throwable is Error) {
       stackTrace ??= throwable.stackTrace;
     }
+    stackTrace ??= _options
+        .exceptionStackTraceExtractor(throwable.runtimeType)
+        ?.stackTrace(throwable);
+
     // throwable.stackTrace is null if its an exception that was never thrown
     // hence we check again if stackTrace is null and if not, read the current stack trace
     // but only if attachStacktrace is enabled
     if (_options.attachStacktrace) {
-      stackTrace ??= StackTrace.current;
+      // TODO: snapshot=true if stackTrace is null
+      // Requires a major breaking change because of grouping
+      if (stackTrace == null || stackTrace == StackTrace.empty) {
+        stackTrace = StackTrace.current;
+      }
     }
 
     SentryStackTrace? sentryStackTrace;
@@ -39,6 +52,7 @@ class SentryExceptionFactory {
       if (frames.isNotEmpty) {
         sentryStackTrace = SentryStackTrace(
           frames: frames,
+          snapshot: snapshot,
         );
       }
     }
@@ -50,6 +64,7 @@ class SentryExceptionFactory {
       value: throwable.toString(),
       mechanism: mechanism,
       stackTrace: sentryStackTrace,
+      throwable: throwable,
     );
   }
 }

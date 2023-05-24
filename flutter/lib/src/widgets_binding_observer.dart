@@ -4,7 +4,6 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../sentry_flutter.dart';
-import 'binding_utils.dart';
 
 /// This is a `WidgetsBindingObserver` which can observe some events of a
 /// Flutter application.
@@ -39,7 +38,8 @@ class SentryWidgetsBindingObserver with WidgetsBindingObserver {
           .skip(1) // Skip initial event added below in constructor
           .listen(_onScreenSizeChanged);
 
-      final window = BindingUtils.getWidgetsBindingInstance()?.window;
+      // ignore: deprecated_member_use
+      final window = _options.bindingUtils.instance?.window;
       _screenSizeStreamController.add(window);
     }
   }
@@ -47,6 +47,7 @@ class SentryWidgetsBindingObserver with WidgetsBindingObserver {
   final Hub _hub;
   final SentryFlutterOptions _options;
 
+  // ignore: deprecated_member_use
   final StreamController<SingletonFlutterWindow?> _screenSizeStreamController;
 
   /// This method records lifecycle events.
@@ -72,6 +73,8 @@ class SentryWidgetsBindingObserver with WidgetsBindingObserver {
       data: <String, String>{
         'state': _lifecycleToString(state),
       },
+      // ignore: invalid_use_of_internal_member
+      timestamp: _options.clock(),
     ));
   }
 
@@ -85,7 +88,8 @@ class SentryWidgetsBindingObserver with WidgetsBindingObserver {
     if (!_options.enableWindowMetricBreadcrumbs) {
       return;
     }
-    final window = BindingUtils.getWidgetsBindingInstance()?.window;
+    // ignore: deprecated_member_use
+    final window = _options.bindingUtils.instance?.window;
     _screenSizeStreamController.add(window);
   }
 
@@ -95,6 +99,8 @@ class SentryWidgetsBindingObserver with WidgetsBindingObserver {
       category: 'device.screen',
       type: 'navigation',
       data: data,
+      // ignore: invalid_use_of_internal_member
+      timestamp: _options.clock(),
     ));
   }
 
@@ -106,7 +112,8 @@ class SentryWidgetsBindingObserver with WidgetsBindingObserver {
       return;
     }
     final brightness =
-        BindingUtils.getWidgetsBindingInstance()?.window.platformBrightness;
+        // ignore: deprecated_member_use
+        _options.bindingUtils.instance?.window.platformBrightness;
     final brightnessDescription =
         brightness == Brightness.dark ? 'dark' : 'light';
 
@@ -117,6 +124,8 @@ class SentryWidgetsBindingObserver with WidgetsBindingObserver {
       data: <String, String>{
         'action': 'BRIGHTNESS_CHANGED_TO_${brightnessDescription.toUpperCase()}'
       },
+      // ignore: invalid_use_of_internal_member
+      timestamp: _options.clock(),
     ));
   }
 
@@ -128,7 +137,9 @@ class SentryWidgetsBindingObserver with WidgetsBindingObserver {
       return;
     }
     final newTextScaleFactor =
-        BindingUtils.getWidgetsBindingInstance()?.window.textScaleFactor;
+        // ignore: deprecated_member_use
+        _options.bindingUtils.instance?.window.textScaleFactor;
+
     _hub.addBreadcrumb(Breadcrumb(
       message: 'Text scale factor changed to $newTextScaleFactor.',
       type: 'system',
@@ -136,6 +147,8 @@ class SentryWidgetsBindingObserver with WidgetsBindingObserver {
       data: <String, String>{
         'action': 'TEXT_SCALE_CHANGED_TO_$newTextScaleFactor'
       },
+      // ignore: invalid_use_of_internal_member
+      timestamp: _options.clock(),
     ));
   }
 
@@ -162,6 +175,8 @@ class SentryWidgetsBindingObserver with WidgetsBindingObserver {
       },
       // This is kinda bad. Therefore this gets added as a warning.
       level: SentryLevel.warning,
+      // ignore: invalid_use_of_internal_member
+      timestamp: _options.clock(),
     ));
   }
 

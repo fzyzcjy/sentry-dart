@@ -11,7 +11,7 @@ import 'package:sentry/sentry.dart';
 /// Remarks:
 /// If this client is used as a wrapper, a call to close also closes the
 /// given client.
-class BreadcrumbClientAdapter extends HttpClientAdapter {
+class BreadcrumbClientAdapter implements HttpClientAdapter {
   // ignore: public_member_api_docs
   BreadcrumbClientAdapter({required HttpClientAdapter client, Hub? hub})
       : _hub = hub ?? HubAdapter(),
@@ -55,14 +55,20 @@ class BreadcrumbClientAdapter extends HttpClientAdapter {
     } finally {
       stopwatch.stop();
 
+      final urlDetails =
+          // ignore: invalid_use_of_internal_member
+          HttpSanitizer.sanitizeUrl(options.uri.toString()) ?? UrlDetails();
+
       final breadcrumb = Breadcrumb.http(
         level: requestHadException ? SentryLevel.error : SentryLevel.info,
-        url: options.uri,
+        url: Uri.parse(urlDetails.urlOrFallback),
         method: options.method,
         statusCode: statusCode,
         reason: reason,
         requestDuration: stopwatch.elapsed,
         responseBodySize: responseBodySize,
+        httpQuery: urlDetails.query,
+        httpFragment: urlDetails.fragment,
       );
 
       await _hub.addBreadcrumb(breadcrumb);

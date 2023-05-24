@@ -114,6 +114,24 @@ void main() {
       expect(capturedEvent.event.contexts.trace, isNotNull);
     });
 
+    test('capture exception should assign sampled trace context', () async {
+      final hub = fixture.getSut();
+
+      final span = SentrySpan(
+        fixture.tracer,
+        fixture._context,
+        hub,
+        samplingDecision: fixture._context.samplingDecision,
+      );
+      hub.setSpanContext(fakeException, span, 'test');
+
+      await hub.captureException(fakeException);
+      final capturedEvent = fixture.client.captureEventCalls.first;
+
+      expect(capturedEvent.event.contexts.trace, isNotNull);
+      expect(capturedEvent.event.contexts.trace!.sampled, isTrue);
+    });
+
     test('Expando does not throw when exception type is not supported',
         () async {
       final hub = fixture.getSut();
@@ -198,7 +216,7 @@ void main() {
         description: 'desc',
       );
 
-      expect(tr.sampled, true);
+      expect(tr.samplingDecision?.sampled, true);
     });
 
     test('start transaction does not sample the transaction', () async {
@@ -210,7 +228,7 @@ void main() {
         description: 'desc',
       );
 
-      expect(tr.sampled, false);
+      expect(tr.samplingDecision?.sampled, false);
     });
 
     test('start transaction runs callback with customSamplingContext',
@@ -233,17 +251,18 @@ void main() {
         customSamplingContext: map,
       );
 
-      expect(tr.sampled, false);
+      expect(tr.samplingDecision?.sampled, false);
     });
 
     test('start transaction respects given sampled', () async {
       final hub = fixture.getSut();
 
       final tr = hub.startTransactionWithContext(
-        SentryTransactionContext('name', 'op', sampled: false),
+        SentryTransactionContext('name', 'op',
+            samplingDecision: SentryTracesSamplingDecision(false)),
       );
 
-      expect(tr.sampled, false);
+      expect(tr.samplingDecision?.sampled, false);
     });
 
     test('start transaction return NoOp if performance is disabled', () async {
@@ -322,6 +341,22 @@ void main() {
       expect(id, tr.eventId);
       expect(fixture.client.captureTransactionCalls.length, 1);
     });
+
+    test('transaction is captured with traceContext', () async {
+      final hub = fixture.getSut();
+
+      var tr = SentryTransaction(fixture.tracer);
+      final context = SentryTraceContextHeader.fromJson(<String, dynamic>{
+        'trace_id': '${tr.eventId}',
+        'public_key': '123',
+      });
+      final id = await hub.captureTransaction(tr, traceContext: context);
+
+      expect(id, tr.eventId);
+      expect(fixture.client.captureTransactionCalls.length, 1);
+      expect(
+          fixture.client.captureTransactionCalls.first.traceContext, context);
+    });
   });
 
   group('Hub scope', () {
@@ -393,6 +428,59 @@ void main() {
         expect(1, scope.breadcrumbs.length);
         expect('test', scope.breadcrumbs.first.message);
       });
+    });
+  });
+
+  group('Hub scope callback', () {
+    late Fixture fixture;
+
+    setUp(() {
+      fixture = Fixture();
+    });
+
+    test('captureEvent should handle thrown error in scope callback', () async {
+      final hub = fixture.getSut(debug: true);
+      final scopeCallbackException = Exception('error in scope callback');
+
+      ScopeCallback scopeCallback = (Scope scope) {
+        throw scopeCallbackException;
+      };
+
+      await hub.captureEvent(fakeEvent, withScope: scopeCallback);
+
+      expect(fixture.loggedException, scopeCallbackException);
+      expect(fixture.loggedLevel, SentryLevel.error);
+    });
+
+    test('captureException should handle thrown error in scope callback',
+        () async {
+      final hub = fixture.getSut(debug: true);
+      final scopeCallbackException = Exception('error in scope callback');
+
+      ScopeCallback scopeCallback = (Scope scope) {
+        throw scopeCallbackException;
+      };
+
+      final exception = Exception("captured exception");
+      await hub.captureException(exception, withScope: scopeCallback);
+
+      expect(fixture.loggedException, scopeCallbackException);
+      expect(fixture.loggedLevel, SentryLevel.error);
+    });
+
+    test('captureMessage should handle thrown error in scope callback',
+        () async {
+      final hub = fixture.getSut(debug: true);
+      final scopeCallbackException = Exception('error in scope callback');
+
+      ScopeCallback scopeCallback = (Scope scope) {
+        throw scopeCallbackException;
+      };
+
+      await hub.captureMessage("captured message", withScope: scopeCallback);
+
+      expect(fixture.loggedException, scopeCallbackException);
+      expect(fixture.loggedLevel, SentryLevel.error);
     });
   });
 
@@ -520,19 +608,26 @@ class Fixture {
   late SentryTransactionContext _context;
   late SentryTracer tracer;
 
+  SentryLevel? loggedLevel;
+  Object? loggedException;
+
   Hub getSut({
     double? tracesSampleRate = 1.0,
     TracesSamplerCallback? tracesSampler,
     bool? sampled = true,
+    bool debug = false,
   }) {
     options.tracesSampleRate = tracesSampleRate;
     options.tracesSampler = tracesSampler;
+    options.debug = debug;
+    options.logger = mockLogger; // Enable logging in DiagnosticsLogger
+
     final hub = Hub(options);
 
     _context = SentryTransactionContext(
       'name',
       'op',
-      sampled: sampled,
+      samplingDecision: SentryTracesSamplingDecision(sampled!),
     );
 
     tracer = SentryTracer(_context, hub);
@@ -541,5 +636,16 @@ class Fixture {
     options.recorder = recorder;
 
     return hub;
+  }
+
+  void mockLogger(
+    SentryLevel level,
+    String message, {
+    String? logger,
+    Object? exception,
+    StackTrace? stackTrace,
+  }) {
+    loggedLevel = level;
+    loggedException = exception;
   }
 }

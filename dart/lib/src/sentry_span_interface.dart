@@ -52,8 +52,24 @@ abstract class ISentrySpan {
   set throwable(dynamic throwable);
 
   @internal
-  bool? get sampled;
+  SentryTracesSamplingDecision? get samplingDecision;
 
   /// Returns the trace information that could be sent as a sentry-trace header.
   SentryTraceHeader toSentryTrace();
+
+  /// Set observed measurement for this transaction.
+  void setMeasurement(
+    String name,
+    num value, {
+    SentryMeasurementUnit? unit,
+  });
+
+  /// Returns the baggage that can be sent as "baggage" header.
+  SentryBaggageHeader? toBaggageHeader();
+
+  /// Returns the trace context.
+  SentryTraceContextHeader? traceContext();
+
+  @internal
+  void scheduleFinish();
 }

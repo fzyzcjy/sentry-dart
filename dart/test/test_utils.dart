@@ -30,16 +30,13 @@ void testHeaders(
     'Content-Type': 'application/x-sentry-envelope',
     'X-Sentry-Auth': 'Sentry sentry_version=7, '
         'sentry_client=$sdkName/$sdkVersion, '
-        'sentry_key=public, '
+        'sentry_key=public'
   };
 
   if (withSecret) {
     expectedHeaders['X-Sentry-Auth'] =
-        '${expectedHeaders['X-Sentry-Auth']!}sentry_secret=secret, ';
+        '${expectedHeaders['X-Sentry-Auth']!}, sentry_secret=secret';
   }
-
-  expectedHeaders['X-Sentry-Auth'] =
-      '${expectedHeaders['X-Sentry-Auth']!}sentry_timestamp=${fakeClockProvider().millisecondsSinceEpoch}';
 
   if (withUserAgent) {
     expectedHeaders['User-Agent'] = '$sdkName/$sdkVersion';
@@ -379,7 +376,7 @@ void runTest({Codec<List<int>, List<int>?>? gzip, bool isWeb = false}) {
       username: 'username',
       email: 'email@email.com',
       ipAddress: '127.0.0.1',
-      extras: <String, String>{'foo': 'bar'},
+      data: <String, String>{'foo': 'bar'},
     );
 
     final options = SentryOptions(

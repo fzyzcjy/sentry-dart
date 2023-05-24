@@ -23,6 +23,8 @@ class SentryException {
   /// Represents a [SentryThread.id].
   final int? threadId;
 
+  final dynamic throwable;
+
   const SentryException({
     required this.type,
     required this.value,
@@ -30,6 +32,7 @@ class SentryException {
     this.stackTrace,
     this.mechanism,
     this.threadId,
+    this.throwable,
   });
 
   /// Deserializes a [SentryException] from JSON [Map].
@@ -51,33 +54,14 @@ class SentryException {
 
   /// Produces a [Map] that can be serialized to JSON.
   Map<String, dynamic> toJson() {
-    final json = <String, dynamic>{};
-
-    if (type != null) {
-      json['type'] = type;
-    }
-
-    if (value != null) {
-      json['value'] = value;
-    }
-
-    if (module != null) {
-      json['module'] = module;
-    }
-
-    if (stackTrace != null) {
-      json['stacktrace'] = stackTrace!.toJson();
-    }
-
-    if (mechanism != null) {
-      json['mechanism'] = mechanism!.toJson();
-    }
-
-    if (threadId != null) {
-      json['thread_id'] = threadId;
-    }
-
-    return json;
+    return <String, dynamic>{
+      if (type != null) 'type': type,
+      if (value != null) 'value': value,
+      if (module != null) 'module': module,
+      if (stackTrace != null) 'stacktrace': stackTrace!.toJson(),
+      if (mechanism != null) 'mechanism': mechanism!.toJson(),
+      if (threadId != null) 'thread_id': threadId,
+    };
   }
 
   SentryException copyWith({
@@ -87,6 +71,7 @@ class SentryException {
     SentryStackTrace? stackTrace,
     Mechanism? mechanism,
     int? threadId,
+    dynamic throwable,
   }) =>
       SentryException(
         type: type ?? this.type,
@@ -95,5 +80,6 @@ class SentryException {
         stackTrace: stackTrace ?? this.stackTrace,
         mechanism: mechanism ?? this.mechanism,
         threadId: threadId ?? this.threadId,
+        throwable: throwable ?? this.throwable,
       );
 }

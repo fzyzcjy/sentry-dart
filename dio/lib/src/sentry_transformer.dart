@@ -3,6 +3,8 @@ import 'package:sentry/sentry.dart';
 
 /// A transformer which wraps transforming in spans
 class SentryTransformer implements Transformer {
+  static const _serializeOp = 'serialize.http.client';
+
   // ignore: public_member_api_docs
   SentryTransformer({required Transformer transformer, Hub? hub})
       : _hub = hub ?? HubAdapter(),
@@ -13,10 +15,21 @@ class SentryTransformer implements Transformer {
 
   @override
   Future<String> transformRequest(RequestOptions options) async {
+    // ignore: invalid_use_of_internal_member
+    final urlDetails = HttpSanitizer.sanitizeUrl(options.uri.toString());
+    var description = options.method;
+    if (urlDetails != null) {
+      description += ' ${urlDetails.urlOrFallback}';
+    }
+
     final span = _hub.getSpan()?.startChild(
-          'serialize',
-          description: '${options.method} ${options.uri}',
+          _serializeOp,
+          description: description,
         );
+
+    span?.setData('http.method', options.method);
+    urlDetails?.applyToSpan(span);
+
     String? request;
     try {
       request = await _transformer.transformRequest(options);
@@ -37,10 +50,21 @@ class SentryTransformer implements Transformer {
     RequestOptions options,
     ResponseBody response,
   ) async {
+    // ignore: invalid_use_of_internal_member
+    final urlDetails = HttpSanitizer.sanitizeUrl(options.uri.toString());
+    var description = options.method;
+    if (urlDetails != null) {
+      description += ' ${urlDetails.urlOrFallback}';
+    }
+
     final span = _hub.getSpan()?.startChild(
-          'serialize',
-          description: '${options.method} ${options.uri}',
+          _serializeOp,
+          description: description,
         );
+
+    span?.setData('http.method', options.method);
+    urlDetails?.applyToSpan(span);
+
     dynamic transformedResponse;
     try {
       transformedResponse =

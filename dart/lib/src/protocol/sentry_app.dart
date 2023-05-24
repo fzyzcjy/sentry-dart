@@ -16,6 +16,8 @@ class SentryApp {
     this.buildType,
     this.startTime,
     this.deviceAppHash,
+    this.appMemory,
+    this.inForeground,
   });
 
   /// Human readable application name, as it appears on the platform.
@@ -39,6 +41,13 @@ class SentryApp {
   /// Application specific device identifier.
   final String? deviceAppHash;
 
+  /// Amount of memory used by the application in bytes.
+  final int? appMemory;
+
+  /// A flag indicating whether the app is in foreground or not.
+  /// An app is in foreground when it's visible to the user.
+  final bool? inForeground;
+
   /// Deserializes a [SentryApp] from JSON [Map].
   factory SentryApp.fromJson(Map<String, dynamic> data) => SentryApp(
         name: data['app_name'],
@@ -50,41 +59,23 @@ class SentryApp {
             ? DateTime.tryParse(data['app_start_time'])
             : null,
         deviceAppHash: data['device_app_hash'],
+        appMemory: data['app_memory'],
+        inForeground: data['in_foreground'],
       );
 
   /// Produces a [Map] that can be serialized to JSON.
   Map<String, dynamic> toJson() {
-    final json = <String, String>{};
-
-    if (name != null) {
-      json['app_name'] = name!;
-    }
-
-    if (version != null) {
-      json['app_version'] = version!;
-    }
-
-    if (identifier != null) {
-      json['app_identifier'] = identifier!;
-    }
-
-    if (build != null) {
-      json['app_build'] = build!;
-    }
-
-    if (buildType != null) {
-      json['build_type'] = buildType!;
-    }
-
-    if (startTime != null) {
-      json['app_start_time'] = startTime!.toIso8601String();
-    }
-
-    if (deviceAppHash != null) {
-      json['device_app_hash'] = deviceAppHash!;
-    }
-
-    return json;
+    return {
+      if (name != null) 'app_name': name!,
+      if (version != null) 'app_version': version!,
+      if (identifier != null) 'app_identifier': identifier!,
+      if (build != null) 'app_build': build!,
+      if (buildType != null) 'build_type': buildType!,
+      if (deviceAppHash != null) 'device_app_hash': deviceAppHash!,
+      if (appMemory != null) 'app_memory': appMemory!,
+      if (startTime != null) 'app_start_time': startTime!.toIso8601String(),
+      if (inForeground != null) 'in_foreground': inForeground!,
+    };
   }
 
   SentryApp clone() => SentryApp(
@@ -95,6 +86,8 @@ class SentryApp {
         buildType: buildType,
         startTime: startTime,
         deviceAppHash: deviceAppHash,
+        appMemory: appMemory,
+        inForeground: inForeground,
       );
 
   SentryApp copyWith({
@@ -105,6 +98,8 @@ class SentryApp {
     String? buildType,
     DateTime? startTime,
     String? deviceAppHash,
+    int? appMemory,
+    bool? inForeground,
   }) =>
       SentryApp(
         name: name ?? this.name,
@@ -114,5 +109,7 @@ class SentryApp {
         buildType: buildType ?? this.buildType,
         startTime: startTime ?? this.startTime,
         deviceAppHash: deviceAppHash ?? this.deviceAppHash,
+        appMemory: appMemory ?? this.appMemory,
+        inForeground: inForeground ?? this.inForeground,
       );
 }

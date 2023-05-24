@@ -10,6 +10,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sentry/sentry.dart';
 import 'package:sentry_flutter/src/file_system_transport.dart';
 
+import 'mocks.dart';
+
 void main() {
   const _channel = MethodChannel('sentry_flutter');
 
@@ -22,10 +24,12 @@ void main() {
   });
 
   tearDown(() {
+    // ignore: deprecated_member_use
     _channel.setMockMethodCallHandler(null);
   });
 
   test('FileSystemTransport wont throw', () async {
+    // ignore: deprecated_member_use
     _channel.setMockMethodCallHandler((MethodCall methodCall) async {});
 
     final transport = fixture.getSut(_channel);
@@ -33,13 +37,18 @@ void main() {
     final sdkVersion =
         SdkVersion(name: 'fixture-sdkName', version: 'fixture-sdkVersion');
 
-    final envelope = SentryEnvelope.fromEvent(event, sdkVersion);
+    final envelope = SentryEnvelope.fromEvent(
+      event,
+      sdkVersion,
+      dsn: fixture.options.dsn,
+    );
     final sentryId = await transport.send(envelope);
 
     expect(sentryId, sentryId);
   });
 
   test('FileSystemTransport returns emptyId if channel throws', () async {
+    // ignore: deprecated_member_use
     _channel.setMockMethodCallHandler((MethodCall methodCall) async {
       throw Exception();
     });
@@ -49,7 +58,11 @@ void main() {
     final sdkVersion =
         SdkVersion(name: 'fixture-sdkName', version: 'fixture-sdkVersion');
 
-    final envelope = SentryEnvelope.fromEvent(event, sdkVersion);
+    final envelope = SentryEnvelope.fromEvent(
+      event,
+      sdkVersion,
+      dsn: fixture.options.dsn,
+    );
     final sentryId = await transport.send(envelope);
 
     expect(SentryId.empty(), sentryId);
@@ -57,6 +70,7 @@ void main() {
 
   test('FileSystemTransport asserts the event', () async {
     dynamic arguments;
+    // ignore: deprecated_member_use
     _channel.setMockMethodCallHandler((MethodCall methodCall) async {
       arguments = methodCall.arguments;
     });
@@ -67,7 +81,11 @@ void main() {
         SentryEvent(message: SentryMessage('hi I am a special char ◤'));
     final sdkVersion =
         SdkVersion(name: 'fixture-sdkName', version: 'fixture-sdkVersion');
-    final envelope = SentryEnvelope.fromEvent(event, sdkVersion);
+    final envelope = SentryEnvelope.fromEvent(
+      event,
+      sdkVersion,
+      dsn: fixture.options.dsn,
+    );
     await transport.send(envelope);
 
     final envelopeList = arguments as List;
@@ -100,7 +118,7 @@ void main() {
 }
 
 class Fixture {
-  final options = SentryOptions(dsn: '');
+  final options = SentryOptions(dsn: fakeDsn);
 
   FileSystemTransport getSut(MethodChannel channel) {
     return FileSystemTransport(channel, options);

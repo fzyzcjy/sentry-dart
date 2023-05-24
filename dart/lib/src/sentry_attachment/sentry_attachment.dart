@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import '../protocol/sentry_view_hierarchy.dart';
+import '../utils.dart';
+
 // https://develop.sentry.dev/sdk/features/#attachments
 // https://develop.sentry.dev/sdk/envelopes/#attachment
 
@@ -27,6 +30,8 @@ class SentryAttachment {
   /// During event ingestion, the last logs are extracted into event
   /// breadcrumbs.
   static const String typeUnrealLogs = 'unreal.logs';
+
+  static const String typeViewHierarchy = 'event.view_hierarchy';
 
   SentryAttachment.fromLoader({
     required ContentLoader loader,
@@ -81,6 +86,20 @@ class SentryAttachment {
           filename: fileName,
           contentType: contentType,
           addToTransactions: addToTransactions,
+        );
+
+  SentryAttachment.fromScreenshotData(Uint8List bytes)
+      : this.fromUint8List(bytes, 'screenshot.png',
+            contentType: 'image/png',
+            attachmentType: SentryAttachment.typeAttachmentDefault);
+
+  SentryAttachment.fromViewHierarchy(SentryViewHierarchy sentryViewHierarchy)
+      : this.fromLoader(
+          loader: () => Uint8List.fromList(
+              utf8JsonEncoder.convert(sentryViewHierarchy.toJson())),
+          filename: 'view-hierarchy.json',
+          contentType: 'application/json',
+          attachmentType: SentryAttachment.typeViewHierarchy,
         );
 
   /// Attachment type.

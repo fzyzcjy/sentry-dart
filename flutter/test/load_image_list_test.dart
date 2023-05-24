@@ -3,6 +3,7 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
+import 'package:sentry_flutter/src/integrations/load_image_list_integration.dart';
 
 import 'mocks.dart';
 import 'sentry_flutter_test.dart';
@@ -12,6 +13,7 @@ void main() {
   late Fixture fixture;
 
   tearDown(() {
+    // ignore: deprecated_member_use
     fixture.channel.setMockMethodCallHandler(null);
   });
 
@@ -35,6 +37,7 @@ void main() {
 
       setUp(() {
         fixture = Fixture(platform);
+        // ignore: deprecated_member_use
         fixture.channel.setMockMethodCallHandler((MethodCall methodCall) async {
           return imageList;
         });
@@ -56,6 +59,7 @@ void main() {
         var called = false;
 
         final sut = fixture.getSut();
+        // ignore: deprecated_member_use
         fixture.channel.setMockMethodCallHandler((MethodCall methodCall) async {
           called = true;
           return imageList;
@@ -76,6 +80,7 @@ void main() {
         var called = false;
 
         final sut = fixture.getSut();
+        // ignore: deprecated_member_use
         fixture.channel.setMockMethodCallHandler((MethodCall methodCall) async {
           called = true;
           return imageList;
@@ -93,6 +98,7 @@ void main() {
         var called = false;
 
         final sut = fixture.getSut();
+        // ignore: deprecated_member_use
         fixture.channel.setMockMethodCallHandler((MethodCall methodCall) async {
           called = true;
           return imageList;
