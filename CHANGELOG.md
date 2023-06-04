@@ -2,17 +2,37 @@
 
 ## Unreleased
 
-### Fixes
+### Enhancements
 
-- Align http method to span convention ([#1477](https://github.com/getsentry/sentry-dart/pull/1477))
-- Wrapped methods return a `Future` instead of executing right away ([#1476](https://github.com/getsentry/sentry-dart/pull/1476))
-  - Relates to ([#1462](https://github.com/getsentry/sentry-dart/pull/1462))
+- Add http fields to `span.data` ([#1497](https://github.com/getsentry/sentry-dart/pull/1497))
+  - Set `http.response.status_code`
+  - Set `http.response_content_length`
+- Improve `SentryException#value`, remove stringified stack trace ([##1470](https://github.com/getsentry/sentry-dart/pull/#1470))
 
 ### Dependencies
 
-- Bump Android SDK from v6.19.0 to v6.19.1 ([#1466](https://github.com/getsentry/sentry-dart/pull/1466))
-  - [changelog](https://github.com/getsentry/sentry-java/blob/main/CHANGELOG.md#6191)
-  - [diff](https://github.com/getsentry/sentry-java/compare/6.19.0...6.19.1)
+- Bump Android SDK from v6.20.0 to v6.21.0 ([#1500](https://github.com/getsentry/sentry-dart/pull/1500))
+  - [changelog](https://github.com/getsentry/sentry-java/blob/main/CHANGELOG.md#6210)
+  - [diff](https://github.com/getsentry/sentry-java/compare/6.20.0...6.21.0)
+
+## 7.6.3
+
+### Fixes
+
+- Check if the Native SDKs are enabled when using `autoInitializeNativeSdk=false` ([#1489](https://github.com/getsentry/sentry-dart/pull/1489))
+- Align http method to span convention ([#1477](https://github.com/getsentry/sentry-dart/pull/1477))
+- Wrapped methods return a `Future` instead of executing right away ([#1476](https://github.com/getsentry/sentry-dart/pull/1476))
+  - Relates to ([#1462](https://github.com/getsentry/sentry-dart/pull/1462))
+- Fix readTimeoutMillis wrongly configures connectionTimeoutMillis instead of the correct field ([#1485](https://github.com/getsentry/sentry-dart/pull/1485))
+
+### Dependencies
+
+- Bump Android SDK from v6.19.0 to v6.20.0 ([#1466](https://github.com/getsentry/sentry-dart/pull/1466), [#1491](https://github.com/getsentry/sentry-dart/pull/1491))
+  - [changelog](https://github.com/getsentry/sentry-java/blob/main/CHANGELOG.md#6200)
+  - [diff](https://github.com/getsentry/sentry-java/compare/6.19.0...6.20.0)
+- Bump Cocoa SDK from v8.7.2 to v8.7.3 ([#1487](https://github.com/getsentry/sentry-dart/pull/1487))
+  - [changelog](https://github.com/getsentry/sentry-cocoa/blob/main/CHANGELOG.md#873)
+  - [diff](https://github.com/getsentry/sentry-cocoa/compare/8.7.2...8.7.3)
 
 ## 7.6.2
 
